@@ -14,7 +14,7 @@ jobs:
 
       - name: Login to DockerHub
         uses: docker/login-action@v2
-        if: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
+        if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
         with:
           username: jamespfennell
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -24,5 +24,5 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           tags: jamespfennell/cdagent:latest
-          # Only push to Docker Hub if this workflow is a push to master
-          push: ${{ github.ref == 'refs/heads/master' && github.event_name == 'push' }}
+          # Only push to Docker Hub if this workflow is a push to main
+          push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
