@@ -1,0 +1,13 @@
+
+poll_interval_seconds: 2
+
+projects:
+- name: Transiter
+  github_user: jamespfennell
+  repo: transiter
+  mainline_branch: master
+
+- name: realtimerail.nyc
+  github_user: jamespfennell
+  repo: realtimerail.nyc
+  mainline_branch: master
