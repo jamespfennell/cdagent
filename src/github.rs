@@ -3,32 +3,36 @@
 use std::time;
 use std::{collections::HashMap, time::Duration};
 
+use crate::database;
+
 /// A GitHub client.
 ///
 /// This is a "good citizen" client that honors rate limiting information,
 ///     and tries to cache requests using the HTTP etag header.
 pub struct Client {
     agent: ureq::Agent,
+    data: Data,
+}
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct Data {
     cache: HashMap<String, (String, WorkflowRun)>,
     rate_limit_resource_to_infos: HashMap<String, RateLimitInfo>,
     auth_token_to_rate_limit_resource: HashMap<String, String>,
 }
 
-impl Default for Client {
-    fn default() -> Self {
+impl Client {
+    pub fn new(database: &database::Database) -> Self {
         let agent = ureq::AgentBuilder::new()
             .timeout(Duration::from_millis(1000))
             .build();
-        Self {
-            agent,
-            cache: HashMap::new(),
-            rate_limit_resource_to_infos: HashMap::new(),
-            auth_token_to_rate_limit_resource: HashMap::new(),
-        }
+        let data = match database.get::<Data>("github_client") {
+            None => Default::default(),
+            Some(data) => data,
+        };
+        Self { agent, data }
     }
-}
 
-impl Client {
     /// Get the latest successful workflow run for the provided repo in branch.
     ///
     /// Returns an error if there have been no successful workflow runs for the branch.
@@ -53,7 +57,7 @@ impl Client {
         if !auth_token.is_empty() {
             request = request.set("Authorization", &format!["Bearer {auth_token}"]);
         }
-        if let Some((etag, _)) = self.cache.get(&url) {
+        if let Some((etag, _)) = self.data.cache.get(&url) {
             request = request.set("if-none-match", etag)
         }
         let response = match request.call() {
@@ -61,14 +65,16 @@ impl Client {
             Err(err) => return Err(format!("failed to make GitHub API request: {err}")),
         };
         if let Some(rate_limit_info) = RateLimitInfo::build(&response) {
-            self.auth_token_to_rate_limit_resource
+            self.data
+                .auth_token_to_rate_limit_resource
                 .insert(auth_token.to_string(), rate_limit_info.resource.clone());
-            self.rate_limit_resource_to_infos
+            self.data
+                .rate_limit_resource_to_infos
                 .insert(rate_limit_info.resource.clone(), rate_limit_info);
         }
 
         if response.status() == 304 {
-            if let Some((_, workflow_run)) = self.cache.get(&url) {
+            if let Some((_, workflow_run)) = self.data.cache.get(&url) {
                 return Ok(workflow_run.clone());
             }
         }
@@ -91,17 +97,17 @@ impl Client {
             None => return Err("GitHub actions has no successful runs".to_string()),
         };
         if let Some(etag) = etag {
-            self.cache.insert(url, (etag, workflow_run.clone()));
+            self.data.cache.insert(url, (etag, workflow_run.clone()));
         }
         Ok(workflow_run)
     }
 
     fn check_for_rate_limiting(&self, auth_token: &str) -> Result<(), String> {
-        let resource = match self.auth_token_to_rate_limit_resource.get(auth_token) {
+        let resource = match self.data.auth_token_to_rate_limit_resource.get(auth_token) {
             None => return Ok(()),
             Some(resource) => resource,
         };
-        let info = match self.rate_limit_resource_to_infos.get(resource) {
+        let info = match self.data.rate_limit_resource_to_infos.get(resource) {
             None => return Ok(()),
             Some(info) => info,
         };
@@ -118,6 +124,10 @@ impl Client {
         };
         Err(format!("reached GitHub API rate limit for this auth token; resource={resource}, limit={}, seconds_to_reset={seconds_to_reset}", info.limit))
     }
+
+    pub fn persist(&self, database: &mut database::Database) {
+        database.set::<Data>("github_client", &self.data);
+    }
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -125,7 +135,7 @@ struct Build {
     workflow_runs: Vec<WorkflowRun>,
 }
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WorkflowRun {
     pub id: u64,
     pub display_title: String,
@@ -136,7 +146,7 @@ pub struct WorkflowRun {
     pub updated_at: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RateLimitInfo {
     pub limit: u64,
     pub remaining: u64,

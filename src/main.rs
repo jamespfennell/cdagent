@@ -1,8 +1,7 @@
 mod config;
+mod database;
 mod github;
-use std::{collections::HashMap, time};
-
-use github::WorkflowRun;
+use std::time;
 
 fn main() {
     if let Err(err) = run() {
@@ -12,7 +11,7 @@ fn main() {
 }
 
 fn run() -> Result<(), String> {
-    let args: Vec<String> = std::env::args().into_iter().collect();
+    let args: Vec<String> = std::env::args().collect();
     let config_file_path = match args.get(1) {
         None => {
             return Err(
@@ -21,6 +20,7 @@ fn run() -> Result<(), String> {
         }
         Some(s) => s,
     };
+    let database_path = args.get(2).cloned();
     let config_file = match std::fs::read_to_string(config_file_path) {
         Ok(s) => s,
         Err(err) => {
@@ -35,10 +35,11 @@ fn run() -> Result<(), String> {
     };
     eprintln!("Using the following config: {config:#?}");
 
-    let mut github_client: github::Client = Default::default();
-    // TODO: it would be nice to persist this cache, and the GitHub client's etag cache,
-    // and logs from running CD commands. We could just persist it all as json on disk.
-    let mut cache: HashMap<usize, github::WorkflowRun> = Default::default();
+    let mut database = match database_path {
+        None => database::Database::new_in_memory(),
+        Some(path) => database::Database::new_on_disk(&path)?,
+    };
+    let mut github_client = github::Client::new(&database);
     let poll_interval = time::Duration::from_secs(match config.poll_interval_seconds {
         None | Some(0) => 300,
         Some(d) => d,
@@ -47,15 +48,17 @@ fn run() -> Result<(), String> {
     loop {
         let start = time::SystemTime::now();
 
-        for (i, project) in config.projects.iter().enumerate() {
-            match run_for_project(project, &mut github_client, cache.get(&i)) {
-                Ok(workflow_run) => {
-                    cache.insert(i, workflow_run);
-                }
-                Err(err) => {
-                    eprintln!("Failed to poll for project {}: {err}", project.name)
-                }
+        for project in config.projects.iter() {
+            if let Err(err) = run_for_project(project, &mut database, &mut github_client) {
+                eprintln!(
+                    "Failed to run one iteration for project {}: {err}",
+                    project.name
+                )
             }
+        }
+        github_client.persist(&mut database);
+        if let Err(err) = database.checkpoint() {
+            eprintln!("Failed to checkpoint database: {err}");
         }
 
         let end = time::SystemTime::now();
@@ -76,9 +79,11 @@ fn run() -> Result<(), String> {
 
 fn run_for_project(
     project: &config::Project,
+    database: &mut database::Database,
     github_client: &mut github::Client,
-    old_workflow_run: Option<&WorkflowRun>,
-) -> Result<WorkflowRun, String> {
+) -> Result<(), String> {
+    let workflow_db_key = format!("last_successful_workflow/{}", project.name);
+    let old_workflow_run = database.get::<github::WorkflowRun>(&workflow_db_key);
     let new_workflow_run = github_client.get_latest_successful_workflow_run(
         &project.github_user,
         &project.repo,
@@ -88,14 +93,16 @@ fn run_for_project(
             Some(s) => s,
         },
     )?;
-    let old_workflow_run = match old_workflow_run {
-        None => return Ok(new_workflow_run),
-        Some(w) => w,
-    };
-    if old_workflow_run.id == new_workflow_run.id {
-        return Ok(new_workflow_run);
+    if let Some(old_workflow_run) = old_workflow_run {
+        if old_workflow_run.id == new_workflow_run.id {
+            return Ok(());
+        }
     }
-    eprintln!("[{}] New successful workflow run found: {new_workflow_run:#?}", project.name);
+    eprintln!(
+        "[{}] New successful workflow run found: {new_workflow_run:#?}",
+        project.name
+    );
+    database.set::<github::WorkflowRun>(&workflow_db_key, &new_workflow_run);
     // TODO: run the command
-    Ok(new_workflow_run)
+    Ok(())
 }
