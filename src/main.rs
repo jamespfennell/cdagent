@@ -1,6 +1,7 @@
 mod config;
 mod database;
 mod github;
+use std::process::Command;
 use std::time;
 
 fn main() {
@@ -103,6 +104,24 @@ fn run_for_project(
         project.name
     );
     database.set::<github::WorkflowRun>(&workflow_db_key, &new_workflow_run);
-    // TODO: run the command
+    for step in &project.steps {
+        let pieces = match shlex::split(&step.run) {
+            None => return Err(format!("invalid run command {}", step.run)),
+            Some(pieces) => pieces,
+        };
+        let program = match pieces.first() {
+            None => return Err("empty run command".into()),
+            Some(command) => command,
+        };
+        eprintln!("Running program {program} with args {:?}", &pieces[1..]);
+        let output = Command::new(program)
+            .args(&pieces[1..])
+            .output()
+            .expect("failed to wait for subprocess");
+        eprintln!("Result: {output:?}");
+        if !output.status.success() {
+            return Err("failed to run command".into());
+        }
+    }
     Ok(())
 }

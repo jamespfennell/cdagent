@@ -54,4 +54,17 @@ pub struct Project {
     /// If provided, the auth token must have GitHub actions read permission
     ///     on the repository.
     pub auth_token: Option<String>,
+
+    /// Steps to perform during a redeployment.
+    #[serde(default)]
+    pub steps: Vec<Step>,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct Step {
+    /// Name of the step.
+    pub name: String,
+
+    /// Command to run.
+    pub run: String,
 }
