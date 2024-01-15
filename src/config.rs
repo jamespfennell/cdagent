@@ -55,6 +55,11 @@ pub struct Project {
     ///     on the repository.
     pub auth_token: Option<String>,
 
+    /// Working directory in which to run the redeployment steps.
+    ///
+    /// Defaults to the working directory of the cdagent invocation.
+    pub working_directory: Option<String>,
+
     /// Steps to perform during a redeployment.
     #[serde(default)]
     pub steps: Vec<Step>,

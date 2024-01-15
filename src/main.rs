@@ -114,10 +114,12 @@ fn run_for_project(
             Some(command) => command,
         };
         eprintln!("Running program {program} with args {:?}", &pieces[1..]);
-        let output = Command::new(program)
-            .args(&pieces[1..])
-            .output()
-            .expect("failed to wait for subprocess");
+        let mut command = Command::new(program);
+        command.args(&pieces[1..]);
+        if let Some(working_directory) = &project.working_directory {
+            command.current_dir(working_directory);
+        }
+        let output = command.output().expect("failed to wait for subprocess");
         eprintln!("Result: {output:?}");
         if !output.status.success() {
             return Err("failed to run command".into());

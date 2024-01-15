@@ -11,6 +11,8 @@ RUN cargo build --release
 
 
 FROM debian:latest
-
+RUN apt update
+RUN apt install docker.io --yes
+RUN apt install docker-compose --yes
 COPY --from=builder build/target/release/cdagent /usr/bin/
 ENTRYPOINT ["cdagent"]
