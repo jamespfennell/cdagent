@@ -83,16 +83,16 @@ fn run_for_project(
     database: &mut database::Database,
     github_client: &mut github::Client,
 ) -> Result<(), String> {
+    if project.paused {
+        return Ok(());
+    }
     let workflow_db_key = format!("last_successful_workflow/{}", project.name);
     let old_workflow_run = database.get::<github::WorkflowRun>(&workflow_db_key);
     let new_workflow_run = github_client.get_latest_successful_workflow_run(
         &project.github_user,
         &project.repo,
         &project.mainline_branch,
-        match &project.auth_token {
-            None => "",
-            Some(s) => s,
-        },
+        &project.auth_token,
     )?;
     if let Some(old_workflow_run) = old_workflow_run {
         if old_workflow_run.id == new_workflow_run.id {
@@ -104,6 +104,12 @@ fn run_for_project(
         project.name
     );
     database.set::<github::WorkflowRun>(&workflow_db_key, &new_workflow_run);
+
+    let mut result = RunResult {
+        project: project.clone(),
+        workflow_run: new_workflow_run,
+        steps: vec![],
+    };
     for step in &project.steps {
         let pieces = match shlex::split(&step.run) {
             None => return Err(format!("invalid run command {}", step.run)),
@@ -120,10 +126,55 @@ fn run_for_project(
             command.current_dir(working_directory);
         }
         let output = command.output().expect("failed to wait for subprocess");
-        eprintln!("Result: {output:?}");
+        let step_result = StepResult::new(step, &output);
         if !output.status.success() {
-            return Err("failed to run command".into());
+            eprintln!("failed to run command: {:?}", result);
+            break;
+        }
+        result.steps.push(step_result);
+    }
+
+    let results_db_key = format!("runs/{}", project.name);
+    let mut results: Vec<RunResult> = database
+        .get::<Vec<RunResult>>(&results_db_key)
+        .unwrap_or_default();
+    results.push(result);
+    database.set::<Vec<RunResult>>(&results_db_key, &results);
+    Ok(())
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct RunResult {
+    project: config::Project,
+    workflow_run: github::WorkflowRun,
+    steps: Vec<StepResult>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+struct StepResult {
+    step: config::Step,
+    success: bool,
+    stdout: String,
+    stderr: String,
+}
+
+impl StepResult {
+    fn new(step: &config::Step, output: &std::process::Output) -> Self {
+        Self {
+            step: step.clone(),
+            success: output.status.success(),
+            stdout: vec_to_string(&output.stdout),
+            stderr: vec_to_string(&output.stderr),
         }
     }
-    Ok(())
+}
+
+fn vec_to_string(v: &[u8]) -> String {
+    match std::str::from_utf8(v) {
+        Ok(s) => s.into(),
+        Err(_) => v
+            .iter()
+            .map(|b| if b.is_ascii() { *b as char } else { '#' })
+            .collect(),
+    }
 }

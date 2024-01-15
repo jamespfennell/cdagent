@@ -29,10 +29,14 @@ pub struct Config {
 /// Each project corresponds to a distinct deployment and generally a distinct GitHub repository.
 /// Whenever there is a new successful CI run on the specified GitHub repository branch,
 ///     the agent will run the specified command.
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Project {
     /// Name of the project. Used for debugging.
     pub name: String,
+
+    /// If the project is paused; defaults to false.
+    #[serde(default)]
+    pub paused: bool,
 
     /// Name of GitHub user that owns the GitHub repository.
     pub github_user: String,
@@ -53,7 +57,8 @@ pub struct Project {
     ///
     /// If provided, the auth token must have GitHub actions read permission
     ///     on the repository.
-    pub auth_token: Option<String>,
+    #[serde(default)]
+    pub auth_token: String,
 
     /// Working directory in which to run the redeployment steps.
     ///
@@ -65,7 +70,7 @@ pub struct Project {
     pub steps: Vec<Step>,
 }
 
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Step {
     /// Name of the step.
     pub name: String,
