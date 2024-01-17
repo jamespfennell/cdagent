@@ -15,5 +15,4 @@ RUN apt update
 RUN apt install docker.io --yes
 RUN apt install docker-compose --yes
 COPY --from=builder build/target/release/cdagent /usr/bin/
-COPY example-config.yaml /example-config.yaml
-ENTRYPOINT ["cdagent", "/example-config.yaml"]
+ENTRYPOINT ["cdagent"]
