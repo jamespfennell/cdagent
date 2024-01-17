@@ -2,16 +2,25 @@ mod config;
 mod database;
 mod github;
 use std::process::Command;
+use std::sync::mpsc;
 use std::time;
 
 fn main() {
-    if let Err(err) = run() {
+    let (tx, rx) = mpsc::channel();
+
+    ctrlc::set_handler(move || {
+        eprintln!("received shut down signal");
+        tx.send(()).expect("Could not send signal on channel.");
+    })
+    .expect("Error setting Ctrl-C handler");
+
+    if let Err(err) = run(rx) {
         eprintln!("Failed to run agent: {err}");
         std::process::exit(1);
     }
 }
 
-fn run() -> Result<(), String> {
+fn run(shutdown: mpsc::Receiver<()>) -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();
     let config_file_path = match args.get(1) {
         None => {
@@ -50,6 +59,15 @@ fn run() -> Result<(), String> {
         let start = time::SystemTime::now();
 
         for project in config.projects.iter() {
+            if shutdown.try_recv().is_ok() {
+                eprintln!(
+                    "running project {} interrupted because of shut down signal",
+                    project.name
+                );
+                // We don't return immediately but instead try to persist progress in the database
+                // before exiting.
+                break;
+            }
             if let Err(err) = run_for_project(project, &mut database, &mut github_client) {
                 eprintln!(
                     "Failed to run one iteration for project {}: {err}",
@@ -69,13 +87,17 @@ fn run() -> Result<(), String> {
         };
         match poll_interval.checked_sub(loop_duration) {
             Some(remaining) => {
-                std::thread::sleep(remaining);
+                if shutdown.recv_timeout(remaining).is_ok() {
+                    eprintln!("sleep interrupted because of shut down signal");
+                    break;
+                }
             }
             None => {
                 eprintln!("Time to poll all projects ({loop_duration:?}) was longer than the poll interval ({poll_interval:?}). Will poll again immediately");
             }
         }
     }
+    Ok(())
 }
 
 fn run_for_project(
