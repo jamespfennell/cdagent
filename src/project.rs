@@ -41,7 +41,7 @@ impl Project {
         self.last_workflow_run = Some(new_workflow_run.clone());
 
         let mut result = RunResult {
-            project: self.config.clone(),
+            config: self.config.clone(),
             workflow_run: new_workflow_run,
             steps: vec![],
         };
@@ -62,11 +62,11 @@ impl Project {
             }
             let output = command.output().expect("failed to wait for subprocess");
             let step_result = StepResult::new(step, &output);
+            result.steps.push(step_result);
             if !output.status.success() {
                 eprintln!("failed to run command: {:?}", result);
                 break;
             }
-            result.steps.push(step_result);
         }
 
         self.run_results.push(result);
@@ -76,14 +76,14 @@ impl Project {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct RunResult {
-    project: config::ProjectConfig,
+    config: config::ProjectConfig,
     workflow_run: github::WorkflowRun,
     steps: Vec<StepResult>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct StepResult {
-    step: config::Step,
+    config: config::Step,
     success: bool,
     stdout: String,
     stderr: String,
@@ -92,7 +92,7 @@ struct StepResult {
 impl StepResult {
     fn new(step: &config::Step, output: &std::process::Output) -> Self {
         Self {
-            step: step.clone(),
+            config: step.clone(),
             success: output.status.success(),
             stdout: vec_to_string(&output.stdout),
             stderr: vec_to_string(&output.stderr),

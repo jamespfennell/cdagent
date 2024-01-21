@@ -56,7 +56,8 @@ fn run(shutdown: mpsc::Receiver<()>) -> Result<(), String> {
     });
     eprintln!("Using the following poll interval: {poll_interval:?}");
 
-    let latest_checkpoint = database.latest_checkpoint();
+    let json_data = database.json_data();
+    let html_data = database.html_data();
     thread::spawn(move || {
         let server = tiny_http::Server::http("0.0.0.0:8000").unwrap();
         for request in server.incoming_requests() {
@@ -68,17 +69,21 @@ fn run(shutdown: mpsc::Receiver<()>) -> Result<(), String> {
                     continue;
                 }
             }
-            let _is_html = match request.url() {
-                "/" | "/index.html" => true,
-                "/data.json" => false,
+            let (data, content_type) = match request.url() {
+                "/" | "/index.html" => {
+                    (html_data.lock().unwrap().clone(), "text/html; charset=UTF-8")
+                }
+                "/data.json" => {
+                    (json_data.lock().unwrap().clone(), "application/json; charset=UTF-8")
+                },
                 _ => {
                     let response = tiny_http::Response::empty(tiny_http::StatusCode(404));
                     request.respond(response).unwrap();
                     continue;
                 }
             };
-            let json_data = { latest_checkpoint.lock().unwrap().clone() };
-            let response = tiny_http::Response::from_string(json_data);
+            let header = tiny_http::Header::from_bytes("Content-Type", content_type).unwrap();
+            let response = tiny_http::Response::from_string(data).with_header(header);
             request.respond(response).unwrap();
         }
     });

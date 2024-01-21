@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CD agent</title>
+
+
+</head>
+<body>
+<h1>CD agent</h1>
+
+<h2>Projects</h2>
+
+{{ for project in projects }}
+
+<h3>{project.config.name}</h3>
+
+<a href="https://github.com/{ project.config.github_user }/{ project.config.repo}">github.com/{ project.config.github_user }/{ project.config.repo}</a>
+
+<h4>Most recent redeployments</h4>
+
+{{ for run in project.run_results }}
+
+<div>
+<a href="{ run.workflow_run.html_url }">{ run.workflow_run.display_title }</a>
+
+{{ for step in run.steps }}
+
+(green circle
+{ step.config.name })
+
+command:
+
+<pre>{ step.config.run }</pre>
+
+
+stdout:
+
+<pre>{step.stdout}</pre>
+
+stderr:
+
+<pre>{step.stderr}</pre>
+
+{{ endfor }}
+
+</div>
+
+{{ endfor }}
+
+{{ endfor }}
+
+<h2>GitHub client</h2>
+
+
+</body>
+</html>

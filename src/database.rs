@@ -3,13 +3,17 @@
 use std::collections::HashMap;
 use std::sync;
 
+static STATUS_DOT_HTML: &str = include_str!("status.html");
+
 /// A simple database for persisting data across runs of the agent.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Database {
     #[serde(skip)]
     path: Option<String>,
     #[serde(skip)]
-    latest_checkpoint: sync::Arc<sync::Mutex<String>>,
+    json_data: sync::Arc<sync::Mutex<String>>,
+    #[serde(skip)]
+    html_data: sync::Arc<sync::Mutex<String>>,
     pub config: crate::config::Config,
     pub github_client: crate::github::Data,
     pub projects: Vec<crate::project::Project>,
@@ -20,7 +24,8 @@ impl Database {
     pub fn new_in_memory(config: crate::config::Config) -> Self {
         Self {
             path: None,
-            latest_checkpoint: Default::default(),
+            json_data: Default::default(),
+            html_data: Default::default(),
             config,
             github_client: Default::default(),
             projects: Default::default(),
@@ -71,6 +76,7 @@ impl Database {
             })
             .collect();
         database.config = config;
+        database.checkpoint()?;
         Ok(database)
     }
 
@@ -86,11 +92,20 @@ impl Database {
                 Err(err) => return Err(format!("failed to write database: {err}")),
             };
         }
-        *self.latest_checkpoint.lock().unwrap() = content;
+        *self.json_data.lock().unwrap() = content;
+
+        let mut tt = tinytemplate::TinyTemplate::new();
+        tt.add_template("status.html", STATUS_DOT_HTML).unwrap();
+        let rendered = tt.render("status.html", self).unwrap();
+        *self.html_data.lock().unwrap() = rendered;
         Ok(())
     }
 
-    pub fn latest_checkpoint(&self) -> sync::Arc<sync::Mutex<String>> {
-        self.latest_checkpoint.clone()
+    pub fn json_data(&self) -> sync::Arc<sync::Mutex<String>> {
+        self.json_data.clone()
+    }
+
+    pub fn html_data(&self) -> sync::Arc<sync::Mutex<String>> {
+        self.html_data.clone()
     }
 }
