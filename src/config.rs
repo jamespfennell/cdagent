@@ -4,7 +4,7 @@
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     /// List of projects to run the agent for.
-    pub projects: Vec<Project>,
+    pub projects: Vec<ProjectConfig>,
 
     /// How often to poll the GitHub API to check for new successful CI runs.
     ///
@@ -30,7 +30,7 @@ pub struct Config {
 /// Whenever there is a new successful CI run on the specified GitHub repository branch,
 ///     the agent will run the specified command.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct Project {
+pub struct ProjectConfig {
     /// Name of the project. Used for debugging.
     pub name: String,
 

@@ -2,7 +2,6 @@ mod config;
 mod database;
 mod github;
 mod project;
-use std::process::Command;
 use std::sync::mpsc;
 use std::time;
 
@@ -69,7 +68,7 @@ fn run(shutdown: mpsc::Receiver<()>) -> Result<(), String> {
                 // before exiting.
                 break;
             }
-            if let Err(err) = run_for_project(project, &mut github_client) {
+            if let Err(err) = project.run(&mut github_client) {
                 eprintln!(
                     "Failed to run one iteration for project {}: {err}",
                     project.config.name
@@ -99,98 +98,4 @@ fn run(shutdown: mpsc::Receiver<()>) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-fn run_for_project(
-    project: &mut project::Project,
-    github_client: &mut github::Client,
-) -> Result<(), String> {
-    if project.config.paused {
-        return Ok(());
-    }
-    let old_workflow_run = &project.last_workflow_run;
-    let new_workflow_run = github_client.get_latest_successful_workflow_run(
-        &project.config.github_user,
-        &project.config.repo,
-        &project.config.mainline_branch,
-        &project.config.auth_token,
-    )?;
-    if let Some(old_workflow_run) = old_workflow_run {
-        if old_workflow_run.id == new_workflow_run.id {
-            return Ok(());
-        }
-    }
-    eprintln!(
-        "[{}] New successful workflow run found: {new_workflow_run:#?}",
-        project.config.name
-    );
-    project.last_workflow_run = Some(new_workflow_run.clone());
-
-    let mut result = RunResult {
-        project: project.config.clone(),
-        workflow_run: new_workflow_run,
-        steps: vec![],
-    };
-    for step in &project.config.steps {
-        let pieces = match shlex::split(&step.run) {
-            None => return Err(format!("invalid run command {}", step.run)),
-            Some(pieces) => pieces,
-        };
-        let program = match pieces.first() {
-            None => return Err("empty run command".into()),
-            Some(command) => command,
-        };
-        eprintln!("Running program {program} with args {:?}", &pieces[1..]);
-        let mut command = Command::new(program);
-        command.args(&pieces[1..]);
-        if let Some(working_directory) = &project.config.working_directory {
-            command.current_dir(working_directory);
-        }
-        let output = command.output().expect("failed to wait for subprocess");
-        let step_result = StepResult::new(step, &output);
-        if !output.status.success() {
-            eprintln!("failed to run command: {:?}", result);
-            break;
-        }
-        result.steps.push(step_result);
-    }
-
-    project.run_results.push(result);
-    Ok(())
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-struct RunResult {
-    project: config::Project,
-    workflow_run: github::WorkflowRun,
-    steps: Vec<StepResult>,
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-struct StepResult {
-    step: config::Step,
-    success: bool,
-    stdout: String,
-    stderr: String,
-}
-
-impl StepResult {
-    fn new(step: &config::Step, output: &std::process::Output) -> Self {
-        Self {
-            step: step.clone(),
-            success: output.status.success(),
-            stdout: vec_to_string(&output.stdout),
-            stderr: vec_to_string(&output.stderr),
-        }
-    }
-}
-
-fn vec_to_string(v: &[u8]) -> String {
-    match std::str::from_utf8(v) {
-        Ok(s) => s.into(),
-        Err(_) => v
-            .iter()
-            .map(|b| if b.is_ascii() { *b as char } else { '#' })
-            .collect(),
-    }
 }

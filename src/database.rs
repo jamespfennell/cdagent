@@ -48,16 +48,23 @@ impl Database {
         };
         let mut existing_projects: Vec<crate::project::Project> = vec![];
         std::mem::swap(&mut existing_projects, &mut database.projects);
-        let mut name_to_existing_project: HashMap<String, crate::project::Project> = existing_projects.into_iter().map(|p| (p.config.name.clone(), p)).collect();
-        database.projects = database.config.projects.iter().map(|c| {
-            match name_to_existing_project.remove(&c.name) {
+        let mut name_to_existing_project: HashMap<String, crate::project::Project> =
+            existing_projects
+                .into_iter()
+                .map(|p| (p.config.name.clone(), p))
+                .collect();
+        database.projects = database
+            .config
+            .projects
+            .iter()
+            .map(|c| match name_to_existing_project.remove(&c.name) {
                 None => crate::project::Project::new(c.clone()),
                 Some(mut project) => {
                     project.config = c.clone();
                     project
-                },
-            }
-        }).collect();
+                }
+            })
+            .collect();
         database.config = config;
         Ok(database)
     }
