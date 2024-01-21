@@ -1,5 +1,5 @@
-use crate::github;
 use crate::config;
+use crate::github;
 use std::process::Command;
 
 #[derive(serde::Serialize, serde::Deserialize)]

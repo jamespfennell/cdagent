@@ -1,11 +1,15 @@
 //! A simple database for persisting data across runs of the agent.
 
 use std::collections::HashMap;
+use std::sync;
 
 /// A simple database for persisting data across runs of the agent.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Database {
+    #[serde(skip)]
     path: Option<String>,
+    #[serde(skip)]
+    latest_checkpoint: sync::Arc<sync::Mutex<String>>,
     pub config: crate::config::Config,
     pub github_client: crate::github::Data,
     pub projects: Vec<crate::project::Project>,
@@ -16,6 +20,7 @@ impl Database {
     pub fn new_in_memory(config: crate::config::Config) -> Self {
         Self {
             path: None,
+            latest_checkpoint: Default::default(),
             config,
             github_client: Default::default(),
             projects: Default::default(),
@@ -73,15 +78,19 @@ impl Database {
     ///
     /// This is a no-op for in-memory databases.
     pub fn checkpoint(&self) -> Result<(), String> {
-        let path = match &self.path {
-            None => return Ok(()),
-            Some(path) => path,
-        };
         let content =
             serde_json::to_string_pretty(&self).expect("failed to serialize database values");
-        match std::fs::write(path, content) {
-            Ok(()) => Ok(()),
-            Err(err) => Err(format!("failed to write database: {err}")),
+        if let Some(path) = &self.path {
+            match std::fs::write(path, &content) {
+                Ok(()) => (),
+                Err(err) => return Err(format!("failed to write database: {err}")),
+            };
         }
+        *self.latest_checkpoint.lock().unwrap() = content;
+        Ok(())
+    }
+
+    pub fn latest_checkpoint(&self) -> sync::Arc<sync::Mutex<String>> {
+        self.latest_checkpoint.clone()
     }
 }

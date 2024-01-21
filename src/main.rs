@@ -3,7 +3,7 @@ mod database;
 mod github;
 mod project;
 use std::sync::mpsc;
-use std::time;
+use std::{thread, time};
 
 fn main() {
     let (tx, rx) = mpsc::channel();
@@ -55,6 +55,34 @@ fn run(shutdown: mpsc::Receiver<()>) -> Result<(), String> {
         Some(d) => d,
     });
     eprintln!("Using the following poll interval: {poll_interval:?}");
+
+    let latest_checkpoint = database.latest_checkpoint();
+    thread::spawn(move || {
+        let server = tiny_http::Server::http("0.0.0.0:8000").unwrap();
+        for request in server.incoming_requests() {
+            match request.method() {
+                tiny_http::Method::Get => {}
+                _ => {
+                    let response = tiny_http::Response::empty(tiny_http::StatusCode(405));
+                    request.respond(response).unwrap();
+                    continue;
+                }
+            }
+            let _is_html = match request.url() {
+                "/" | "/index.html" => true,
+                "/data.json" => false,
+                _ => {
+                    let response = tiny_http::Response::empty(tiny_http::StatusCode(404));
+                    request.respond(response).unwrap();
+                    continue;
+                }
+            };
+            let json_data = { latest_checkpoint.lock().unwrap().clone() };
+            let response = tiny_http::Response::from_string(json_data);
+            request.respond(response).unwrap();
+        }
+    });
+
     loop {
         let start = time::SystemTime::now();
 
