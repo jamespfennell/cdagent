@@ -1,21 +1,24 @@
-//! A simple key-value database for persisting data across runs of the agent.
+//! A simple database for persisting data across runs of the agent.
 
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use std::collections::HashMap;
 
-/// A simple key-value database for persisting data across runs of the agent.
+/// A simple database for persisting data across runs of the agent.
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Database {
     path: Option<String>,
-    values: HashMap<String, serde_json::Value>,
+    pub config: crate::config::Config,
+    pub github_client: crate::github::Data,
+    pub projects: Vec<crate::project::Project>,
 }
 
 impl Database {
     /// Create a new in-memory database.
-    pub fn new_in_memory() -> Self {
+    pub fn new_in_memory(config: crate::config::Config) -> Self {
         Self {
             path: None,
-            values: Default::default(),
+            config,
+            github_client: Default::default(),
+            projects: Default::default(),
         }
     }
 
@@ -25,7 +28,7 @@ impl Database {
     ///
     /// This constructor fails if there is an IO error when reading the path,
     ///     or if the file is not valid JSON.
-    pub fn new_on_disk(path: &str) -> Result<Self, String> {
+    pub fn new_on_disk(config: crate::config::Config, path: &str) -> Result<Self, String> {
         let json = match std::fs::read_to_string(path) {
             Ok(json) => json,
             Err(err) => {
@@ -33,43 +36,30 @@ impl Database {
                     eprintln!("Database file {path} doesn't exist; initializing new database");
                     return Ok(Self {
                         path: Some(path.into()),
-                        values: Default::default(),
+                        ..Self::new_in_memory(config)
                     });
                 }
                 return Err(format!("failed to open database file: {err}"));
             }
         };
-        let values = match serde_json::from_str(&json) {
+        let mut database: Self = match serde_json::from_str(&json) {
             Ok(values) => values,
             Err(err) => return Err(format!("database file is corrupt: {err}. Consider deleting the file to initialize a new database"))
         };
-        Ok(Self {
-            path: Some(path.into()),
-            values,
-        })
-    }
-
-    /// Get a value from the database.
-    pub fn get<T: DeserializeOwned>(&self, key: &str) -> Option<T> {
-        let value = match self.values.get(key) {
-            None => return None,
-            Some(value) => value,
-        };
-        match serde_json::from_value::<T>(value.clone()) {
-            Ok(t) => Some(t),
-            Err(err) => {
-                eprintln!("Failed to convert json value: {err}");
-                None
+        let mut existing_projects: Vec<crate::project::Project> = vec![];
+        std::mem::swap(&mut existing_projects, &mut database.projects);
+        let mut name_to_existing_project: HashMap<String, crate::project::Project> = existing_projects.into_iter().map(|p| (p.config.name.clone(), p)).collect();
+        database.projects = database.config.projects.iter().map(|c| {
+            match name_to_existing_project.remove(&c.name) {
+                None => crate::project::Project::new(c.clone()),
+                Some(mut project) => {
+                    project.config = c.clone();
+                    project
+                },
             }
-        }
-    }
-
-    /// Set a value in the database.
-    pub fn set<T: Serialize>(&mut self, key: &str, value: &T) {
-        self.values.insert(
-            key.to_string(),
-            serde_json::to_value(value).expect("failed to serialize value"),
-        );
+        }).collect();
+        database.config = config;
+        Ok(database)
     }
 
     /// Checkpoint the database by writing its full state to disk.
@@ -80,8 +70,8 @@ impl Database {
             None => return Ok(()),
             Some(path) => path,
         };
-        let content = serde_json::to_string_pretty(&self.values)
-            .expect("failed to serialize database values");
+        let content =
+            serde_json::to_string_pretty(&self).expect("failed to serialize database values");
         match std::fs::write(path, content) {
             Ok(()) => Ok(()),
             Err(err) => Err(format!("failed to write database: {err}")),

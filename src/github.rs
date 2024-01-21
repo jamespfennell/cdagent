@@ -14,8 +14,8 @@ pub struct Client {
     data: Data,
 }
 
-#[derive(Default, serde::Serialize, serde::Deserialize)]
-struct Data {
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct Data {
     cache: HashMap<String, (String, WorkflowRun)>,
     rate_limit_resource_to_infos: HashMap<String, RateLimitInfo>,
     auth_token_to_rate_limit_resource: HashMap<String, String>,
@@ -26,10 +26,7 @@ impl Client {
         let agent = ureq::AgentBuilder::new()
             .timeout(Duration::from_millis(1000))
             .build();
-        let data = match database.get::<Data>("github_client") {
-            None => Default::default(),
-            Some(data) => data,
-        };
+        let data = database.github_client.clone();
         Self { agent, data }
     }
 
@@ -126,7 +123,7 @@ impl Client {
     }
 
     pub fn persist(&self, database: &mut database::Database) {
-        database.set::<Data>("github_client", &self.data);
+        database.github_client = self.data.clone();
     }
 }
 

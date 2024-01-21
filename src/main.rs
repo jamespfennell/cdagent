@@ -1,6 +1,7 @@
 mod config;
 mod database;
 mod github;
+mod project;
 use std::process::Command;
 use std::sync::mpsc;
 use std::time;
@@ -46,11 +47,11 @@ fn run(shutdown: mpsc::Receiver<()>) -> Result<(), String> {
     eprintln!("Using the following config: {config:#?}");
 
     let mut database = match database_path {
-        None => database::Database::new_in_memory(),
-        Some(path) => database::Database::new_on_disk(&path)?,
+        None => database::Database::new_in_memory(config),
+        Some(path) => database::Database::new_on_disk(config, &path)?,
     };
     let mut github_client = github::Client::new(&database);
-    let poll_interval = time::Duration::from_secs(match config.poll_interval_seconds {
+    let poll_interval = time::Duration::from_secs(match database.config.poll_interval_seconds {
         None | Some(0) => 300,
         Some(d) => d,
     });
@@ -58,20 +59,20 @@ fn run(shutdown: mpsc::Receiver<()>) -> Result<(), String> {
     loop {
         let start = time::SystemTime::now();
 
-        for project in config.projects.iter() {
+        for project in database.projects.iter_mut() {
             if shutdown.try_recv().is_ok() {
                 eprintln!(
                     "running project {} interrupted because of shut down signal",
-                    project.name
+                    project.config.name
                 );
                 // We don't return immediately but instead try to persist progress in the database
                 // before exiting.
                 break;
             }
-            if let Err(err) = run_for_project(project, &mut database, &mut github_client) {
+            if let Err(err) = run_for_project(project, &mut github_client) {
                 eprintln!(
                     "Failed to run one iteration for project {}: {err}",
-                    project.name
+                    project.config.name
                 )
             }
         }
@@ -101,20 +102,18 @@ fn run(shutdown: mpsc::Receiver<()>) -> Result<(), String> {
 }
 
 fn run_for_project(
-    project: &config::Project,
-    database: &mut database::Database,
+    project: &mut project::Project,
     github_client: &mut github::Client,
 ) -> Result<(), String> {
-    if project.paused {
+    if project.config.paused {
         return Ok(());
     }
-    let workflow_db_key = format!("last_successful_workflow/{}", project.name);
-    let old_workflow_run = database.get::<github::WorkflowRun>(&workflow_db_key);
+    let old_workflow_run = &project.last_workflow_run;
     let new_workflow_run = github_client.get_latest_successful_workflow_run(
-        &project.github_user,
-        &project.repo,
-        &project.mainline_branch,
-        &project.auth_token,
+        &project.config.github_user,
+        &project.config.repo,
+        &project.config.mainline_branch,
+        &project.config.auth_token,
     )?;
     if let Some(old_workflow_run) = old_workflow_run {
         if old_workflow_run.id == new_workflow_run.id {
@@ -123,16 +122,16 @@ fn run_for_project(
     }
     eprintln!(
         "[{}] New successful workflow run found: {new_workflow_run:#?}",
-        project.name
+        project.config.name
     );
-    database.set::<github::WorkflowRun>(&workflow_db_key, &new_workflow_run);
+    project.last_workflow_run = Some(new_workflow_run.clone());
 
     let mut result = RunResult {
-        project: project.clone(),
+        project: project.config.clone(),
         workflow_run: new_workflow_run,
         steps: vec![],
     };
-    for step in &project.steps {
+    for step in &project.config.steps {
         let pieces = match shlex::split(&step.run) {
             None => return Err(format!("invalid run command {}", step.run)),
             Some(pieces) => pieces,
@@ -144,7 +143,7 @@ fn run_for_project(
         eprintln!("Running program {program} with args {:?}", &pieces[1..]);
         let mut command = Command::new(program);
         command.args(&pieces[1..]);
-        if let Some(working_directory) = &project.working_directory {
+        if let Some(working_directory) = &project.config.working_directory {
             command.current_dir(working_directory);
         }
         let output = command.output().expect("failed to wait for subprocess");
@@ -156,12 +155,7 @@ fn run_for_project(
         result.steps.push(step_result);
     }
 
-    let results_db_key = format!("runs/{}", project.name);
-    let mut results: Vec<RunResult> = database
-        .get::<Vec<RunResult>>(&results_db_key)
-        .unwrap_or_default();
-    results.push(result);
-    database.set::<Vec<RunResult>>(&results_db_key, &results);
+    project.run_results.push(result);
     Ok(())
 }
 

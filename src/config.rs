@@ -1,7 +1,7 @@
 //! Configuration for the agent.
 
 /// Configuration for the agent.
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Config {
     /// List of projects to run the agent for.
     pub projects: Vec<Project>,
