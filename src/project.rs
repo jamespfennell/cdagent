@@ -42,6 +42,7 @@ impl Project {
 
         let mut result = RunResult {
             config: self.config.clone(),
+            success: true,
             workflow_run: new_workflow_run,
             steps: vec![],
         };
@@ -64,6 +65,7 @@ impl Project {
             let step_result = StepResult::new(step, &output);
             result.steps.push(step_result);
             if !output.status.success() {
+                result.success = false;
                 eprintln!("failed to run command: {:?}", result);
                 break;
             }
@@ -77,6 +79,7 @@ impl Project {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct RunResult {
     config: config::ProjectConfig,
+    success: bool,
     workflow_run: github::WorkflowRun,
     steps: Vec<StepResult>,
 }

@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CD agent</title>
 
-
 </head>
 <body>
 <h1>CD agent</h1>
@@ -22,13 +21,17 @@
 
 {{ for run in project.run_results }}
 
-<div>
-<a href="{ run.workflow_run.html_url }">{ run.workflow_run.display_title }</a>
+<span style="color:{{ if run.success }}green{{ else }}red{{ endif }}">●</span>
+ <details>
+    <summary>{ run.workflow_run.display_title }</summary>
+
+    <a href="{ run.workflow_run.html_url }">GitHub workflows run</a>
 
 {{ for step in run.steps }}
 
-(green circle
-{ step.config.name })
+<span style="color:{{ if step.success }}green{{ else }}red{{ endif }}">●</span>
+<details>
+    <summary>{ step.config.name }</summary>
 
 command:
 
@@ -42,10 +45,11 @@ stdout:
 stderr:
 
 <pre>{step.stderr}</pre>
+</details>
 
 {{ endfor }}
+</details>
 
-</div>
 
 {{ endfor }}
 

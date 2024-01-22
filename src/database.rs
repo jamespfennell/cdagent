@@ -39,23 +39,25 @@ impl Database {
     /// This constructor fails if there is an IO error when reading the path,
     ///     or if the file is not valid JSON.
     pub fn new_on_disk(config: crate::config::Config, path: &str) -> Result<Self, String> {
-        let json = match std::fs::read_to_string(path) {
-            Ok(json) => json,
+        let mut database: Self = match std::fs::read_to_string(path) {
+            Ok(json) => {
+                let mut database: Self = match serde_json::from_str(&json) {
+                    Ok(values) => values,
+                    Err(err) => return Err(format!("database file is corrupt: {err}. Consider deleting the file to initialize a new database"))
+                };
+                database.config = config;
+                database
+            }
             Err(err) => {
                 if err.kind() == std::io::ErrorKind::NotFound {
                     eprintln!("Database file {path} doesn't exist; initializing new database");
-                    return Ok(Self {
-                        path: Some(path.into()),
-                        ..Self::new_in_memory(config)
-                    });
+                    Self::new_in_memory(config)
+                } else {
+                    return Err(format!("failed to open database file: {err}"));
                 }
-                return Err(format!("failed to open database file: {err}"));
             }
         };
-        let mut database: Self = match serde_json::from_str(&json) {
-            Ok(values) => values,
-            Err(err) => return Err(format!("database file is corrupt: {err}. Consider deleting the file to initialize a new database"))
-        };
+        database.path = Some(path.to_string());
         let mut existing_projects: Vec<crate::project::Project> = vec![];
         std::mem::swap(&mut existing_projects, &mut database.projects);
         let mut name_to_existing_project: HashMap<String, crate::project::Project> =
@@ -75,7 +77,6 @@ impl Database {
                 }
             })
             .collect();
-        database.config = config;
         database.checkpoint()?;
         Ok(database)
     }

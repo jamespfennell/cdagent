@@ -70,12 +70,14 @@ fn run(shutdown: mpsc::Receiver<()>) -> Result<(), String> {
                 }
             }
             let (data, content_type) = match request.url() {
-                "/" | "/index.html" => {
-                    (html_data.lock().unwrap().clone(), "text/html; charset=UTF-8")
-                }
-                "/data.json" => {
-                    (json_data.lock().unwrap().clone(), "application/json; charset=UTF-8")
-                },
+                "/" | "/index.html" => (
+                    html_data.lock().unwrap().clone(),
+                    "text/html; charset=UTF-8",
+                ),
+                "/data.json" => (
+                    json_data.lock().unwrap().clone(),
+                    "application/json; charset=UTF-8",
+                ),
                 _ => {
                     let response = tiny_http::Response::empty(tiny_http::StatusCode(404));
                     request.respond(response).unwrap();
