@@ -14,5 +14,6 @@ FROM debian:latest
 RUN apt update
 RUN apt install docker.io --yes
 RUN apt install docker-compose --yes
+RUN apt install curl --yes
 COPY --from=builder build/target/release/cdagent /usr/bin/
 ENTRYPOINT ["cdagent"]
