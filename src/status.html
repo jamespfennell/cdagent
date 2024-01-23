@@ -3,60 +3,153 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CD agent</title>
+<title>Continuous deployment agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,400;1,700&display=swap" rel="stylesheet"> 
+<style>
 
+.container {
+    max-width: 700px;
+    margin: 0px auto;
+    font-family: 'Roboto', sans-serif;
+}
+
+h1, h2, h3, h4 {
+    font-weight: 700;
+}
+
+.indent {
+    margin-left: 10px;
+}
+.marker {
+  margin: -4px 5px 0px 0px;
+  font-size: 1.8em;
+}
+
+.green {
+    color: green;
+}
+
+.red {
+    color: red;
+}
+
+.redeployment {
+  margin: 5px;
+}
+
+.redeployment > details {
+  padding: 0px;
+  margin: 0px 0px 0px 0px;
+  border: 1px solid lightgray;
+}
+
+.redeployment > details > summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 5px;
+  background: #eee;
+}
+
+.redeployment .detailsContent {
+  padding: 10px;
+}
+
+.step {
+  margin: 0px 5px 1px 0px;
+}
+
+.step > details {
+  padding: 0px;
+  margin: 0px 0px 0px 4px;
+}
+
+.step > details > summary {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 5px;
+  background: #eee;
+  margin: 2px 0px 1px 0px;
+}
+
+pre {
+  border: 1px solid lightgray;
+  border-radius: 5px;
+  padding: 10px;
+  background-color: #eee;
+}
+</style>
 </head>
 <body>
-<h1>CD agent</h1>
+<div class="container">
+<h1>Continuous deployment agent</h1>
+
+<p>Build #TODO | <a href="https://github.com/jamespfennell/cdagent">Agent GitHub repo</a></p>
 
 <h2>Projects</h2>
+<div class="indent">
 
-{{ for project in projects }}
+<ul>
+{{ #each projects }}
+    <li><a href="#projects-{{config.name}}">{{ config.name }}</a></li>
+{{ /each }}
+</ul>
 
-<h3>{project.config.name}</h3>
+{{ #each projects }}
 
-<a href="https://github.com/{ project.config.github_user }/{ project.config.repo}">github.com/{ project.config.github_user }/{ project.config.repo}</a>
+<a name="projects-{{config.name}}"></a>
+<h3>{{config.name}}</h3>
+<div class="indent">
+
+<a href="https://github.com/{{ config.github_user }}/{{ config.repo}}">github.com/{{ config.github_user }}/{{ config.repo}}</a>
 
 <h4>Most recent redeployments</h4>
 
-{{ for run in project.run_results }}
+{{ #each run_results }}
 
-<span style="color:{{ if run.success }}green{{ else }}red{{ endif }}">●</span>
- <details>
-    <summary>{ run.workflow_run.display_title }</summary>
+<div class="redeployment">
+    <details>
+        <summary>
+            <div class="marker {{ #if success }}green{{ else }}red{{ /if }}">●</div>
+            <div class="title">{{ workflow_run.display_title }}</div>
+        </summary>
+        <div class="detailsContent">
+            <p>
+                <a href="{{ workflow_run.html_url }}">View CI run on GitHub</a>
+            </p>
+            <h5>Redeployment steps</h5>
+            {{ #each steps }}
+            <div class="step">
+                <details>
+                    <summary>
+                        <div class="marker {{ #if success }}green{{ else }}red{{ /if }}">●</div>
+                        <div class="title">{{ config.name }}</div>
+                    </summary>
+                    <div class="detailsContent">
+                        <p>command</p>
+                        <pre>{{ config.run }}</pre>
+                        <p>stdout</p>
+                        <pre>{{ stdout }}</pre>
+                        <p>stderr</p>
+                        <pre>{{ stderr }}</pre>
+                    </div>
+                </details>
+            </div>
+            {{ /each }}
+        </div>
+    </details>
+</div>
 
-    <a href="{ run.workflow_run.html_url }">GitHub workflows run</a>
+{{ /each }}
+</div>
 
-{{ for step in run.steps }}
+{{ /each }}
+</div>
 
-<span style="color:{{ if step.success }}green{{ else }}red{{ endif }}">●</span>
-<details>
-    <summary>{ step.config.name }</summary>
-
-command:
-
-<pre>{ step.config.run }</pre>
-
-
-stdout:
-
-<pre>{step.stdout}</pre>
-
-stderr:
-
-<pre>{step.stderr}</pre>
-</details>
-
-{{ endfor }}
-</details>
-
-
-{{ endfor }}
-
-{{ endfor }}
-
-<h2>GitHub client</h2>
-
+</div>
 
 </body>
 </html>

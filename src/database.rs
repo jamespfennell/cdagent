@@ -95,8 +95,9 @@ impl Database {
         }
         *self.json_data.lock().unwrap() = content;
 
-        let mut tt = tinytemplate::TinyTemplate::new();
-        tt.add_template("status.html", STATUS_DOT_HTML).unwrap();
+       
+        let mut tt =handlebars::Handlebars::new();
+        tt.register_template_string("status.html", STATUS_DOT_HTML).unwrap();
         let rendered = tt.render("status.html", self).unwrap();
         *self.html_data.lock().unwrap() = rendered;
         Ok(())

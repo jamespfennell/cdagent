@@ -11,4 +11,4 @@ serde_yaml = "0.9.27"
 shlex = "1.2.0"
 ctrlc = {version = "3.4.2", features = ["termination"] }
 tiny_http = "0.12.0"
-tinytemplate = "1.2.1"
+handlebars = "5.1.1"
