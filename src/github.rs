@@ -93,6 +93,12 @@ impl Client {
             Some(workflow_run) => workflow_run,
             None => return Err("GitHub actions has no successful runs".to_string()),
         };
+        if let Some((old_etag, cached_workflow_run)) = self.data.cache.get(&url) {
+            if workflow_run.created_at < cached_workflow_run.created_at {
+                return Err(format!["GitHub returned a stale workflow run! old_etag={old_etag}, new_etag={etag:?},\ncached_workflow={cached_workflow_run:#?}\nbody=<begin>\n{body}\n<end>"]);
+            }
+        }
+
         if let Some(etag) = etag {
             self.data.cache.insert(url, (etag, workflow_run.clone()));
         }

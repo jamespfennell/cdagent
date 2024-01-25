@@ -19,6 +19,7 @@ impl Project {
     }
 
     pub fn run(&mut self, github_client: &mut github::Client) -> Result<(), String> {
+        let started = chrono::offset:: Utc::now();
         if self.config.paused {
             return Ok(());
         }
@@ -42,6 +43,8 @@ impl Project {
 
         let mut result = RunResult {
             config: self.config.clone(),
+            started: started.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            finished: "".to_string(),
             success: true,
             workflow_run: new_workflow_run,
             steps: vec![],
@@ -70,7 +73,8 @@ impl Project {
                 break;
             }
         }
-
+        let finished = chrono::offset:: Utc::now();
+        result.finished = finished.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         self.run_results.push(result);
         Ok(())
     }
@@ -79,6 +83,10 @@ impl Project {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct RunResult {
     config: config::ProjectConfig,
+    #[serde(default)] 
+    started: String,
+    #[serde(default)] 
+    finished: String,
     success: bool,
     workflow_run: github::WorkflowRun,
     steps: Vec<StepResult>,

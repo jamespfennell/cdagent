@@ -77,6 +77,9 @@ impl Database {
                 }
             })
             .collect();
+        database
+            .projects
+            .sort_by_key(|p| p.config.name.clone().to_lowercase());
         database.checkpoint()?;
         Ok(database)
     }
@@ -95,9 +98,9 @@ impl Database {
         }
         *self.json_data.lock().unwrap() = content;
 
-       
-        let mut tt =handlebars::Handlebars::new();
-        tt.register_template_string("status.html", STATUS_DOT_HTML).unwrap();
+        let mut tt = handlebars::Handlebars::new();
+        tt.register_template_string("status.html", STATUS_DOT_HTML)
+            .unwrap();
         let rendered = tt.render("status.html", self).unwrap();
         *self.html_data.lock().unwrap() = rendered;
         Ok(())

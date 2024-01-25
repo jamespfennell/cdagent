@@ -114,12 +114,27 @@ pre {
     <details>
         <summary>
             <div class="marker {{ #if success }}green{{ else }}red{{ /if }}">●</div>
-            <div class="title">{{ workflow_run.display_title }}</div>
+            <div class="title">{{ workflow_run.display_title }} ({{ workflow_run.updated_at }})</div>
         </summary>
         <div class="detailsContent">
             <p>
                 <a href="{{ workflow_run.html_url }}">View CI run on GitHub</a>
             </p>
+            <h5>Timeline</h5>
+            <table>
+              <tr>
+                <td>GitHub workflow started</td><td>{{ workflow_run.created_at }}</td>
+                </tr>
+                <tr>
+                <td>GitHub workflow finished</td><td>{{ workflow_run.updated_at }}</td>
+                </tr>
+                <tr>
+                <td>CD Agent run started</td><td>{{ started }}</td>
+                </tr>
+                <tr>
+                <td>CD Agent run finished</td><td>{{ finished }}</td>
+              </tr>
+            </table>
             <h5>Redeployment steps</h5>
             {{ #each steps }}
             <div class="step">
@@ -148,6 +163,33 @@ pre {
 
 {{ /each }}
 </div>
+
+
+<h2>GitHub client</h2>
+
+<h3>URLs</h3>
+
+<ul>
+  {{ #each github_client.cache as |data key| }}
+  <li>{{ key }}</li>
+  {{ /each }}
+</ul>
+<h3>Rate limiting data</h3>
+
+<table>
+  <tr>
+    <th>resource</th>
+    <th>used/limit</th>
+    <th>reset time</th>
+  </tr>
+  {{ #each github_client.rate_limit_resource_to_infos as |info key| }}
+  <tr>
+    <td>{{ info.resource }}</td>
+    <td>{{ info.used }}/{{ info.limit }}</td>
+    <td>{{ info.reset }}</td>
+  </tr>
+  {{ /each }}
+</table>
 
 </div>
 

@@ -1,0 +1,211 @@
+{
+  "config": {
+    "projects": [
+      {
+        "name": "Transiter",
+        "paused": false,
+        "github_user": "jamespfennell",
+        "repo": "transiter",
+        "mainline_branch": "master",
+        "auth_token": "",
+        "working_directory": null,
+        "steps": [
+          {
+            "name": "Pull Docker image",
+            "run": "ls -lah"
+          },
+          {
+            "name": "Recreate the Docker container",
+            "run": "ls ds"
+          }
+        ]
+      },
+      {
+        "name": "realtimerail.nyc",
+        "paused": false,
+        "github_user": "jamespfennell",
+        "repo": "realtimerail.nyc",
+        "mainline_branch": "master",
+        "auth_token": "",
+        "working_directory": null,
+        "steps": []
+      }
+    ],
+    "poll_interval_seconds": 10
+  },
+  "github_client": {
+    "cache": {
+      "https://api.github.com/repos/jamespfennell/realtimerail.nyc/actions/runs?branch=master&event=push&status=success&per_page=1&exclude_pull_requests=true": [
+        "W/\"844d8c79fb5dc32262a2b94d2848f465ab24b7fca3dcb4bc7d701bc87f189fe3\"",
+        {
+          "id": 7550705951,
+          "display_title": "Make sorting favorite stops toggleable (#45)",
+          "run_number": 143,
+          "head_sha": "5d233e920ba94771e019298c84342fc48172be69",
+          "html_url": "https://github.com/jamespfennell/realtimerail.nyc/actions/runs/7550705951",
+          "created_at": "2024-01-17T03:34:35Z",
+          "updated_at": "2024-01-17T03:35:57Z"
+        }
+      ],
+      "https://api.github.com/repos/jamespfennell/transiter/actions/runs?branch=master&event=push&status=success&per_page=1&exclude_pull_requests=true": [
+        "W/\"9444417faa861e8471aaaa6267e7477e6082e95c258b82e2fe1982e97cf0d20c\"",
+        {
+          "id": 7626982060,
+          "display_title": "Fix logging madness",
+          "run_number": 15,
+          "head_sha": "40b228db98449657e1542c795339556f0815d018",
+          "html_url": "https://github.com/jamespfennell/transiter/actions/runs/7626982060",
+          "created_at": "2024-01-23T14:11:25Z",
+          "updated_at": "2024-01-23T14:16:24Z"
+        }
+      ]
+    },
+    "rate_limit_resource_to_infos": {
+      "core": {
+        "limit": 60,
+        "remaining": 59,
+        "used": 1,
+        "reset": 1706119577,
+        "resource": "core"
+      }
+    },
+    "auth_token_to_rate_limit_resource": {
+      "": "core"
+    }
+  },
+  "projects": [
+    {
+      "config": {
+        "name": "realtimerail.nyc",
+        "paused": false,
+        "github_user": "jamespfennell",
+        "repo": "realtimerail.nyc",
+        "mainline_branch": "master",
+        "auth_token": "",
+        "working_directory": null,
+        "steps": []
+      },
+      "last_workflow_run": {
+        "id": 7550705951,
+        "display_title": "Make sorting favorite stops toggleable (#45)",
+        "run_number": 143,
+        "head_sha": "5d233e920ba94771e019298c84342fc48172be69",
+        "html_url": "https://github.com/jamespfennell/realtimerail.nyc/actions/runs/7550705951",
+        "created_at": "2024-01-17T03:34:35Z",
+        "updated_at": "2024-01-17T03:35:57Z"
+      },
+      "run_results": [
+        {
+          "config": {
+            "name": "realtimerail.nyc",
+            "paused": false,
+            "github_user": "jamespfennell",
+            "repo": "realtimerail.nyc",
+            "mainline_branch": "master",
+            "auth_token": "",
+            "working_directory": null,
+            "steps": []
+          },
+          "started": "2024-01-24T15:46:17Z",
+          "finished": "2024-01-24T15:46:17Z",
+          "success": true,
+          "workflow_run": {
+            "id": 7550705951,
+            "display_title": "Make sorting favorite stops toggleable (#45)",
+            "run_number": 143,
+            "head_sha": "5d233e920ba94771e019298c84342fc48172be69",
+            "html_url": "https://github.com/jamespfennell/realtimerail.nyc/actions/runs/7550705951",
+            "created_at": "2024-01-17T03:34:35Z",
+            "updated_at": "2024-01-17T03:35:57Z"
+          },
+          "steps": []
+        }
+      ]
+    },
+    {
+      "config": {
+        "name": "Transiter",
+        "paused": false,
+        "github_user": "jamespfennell",
+        "repo": "transiter",
+        "mainline_branch": "master",
+        "auth_token": "",
+        "working_directory": null,
+        "steps": [
+          {
+            "name": "Pull Docker image",
+            "run": "ls -lah"
+          },
+          {
+            "name": "Recreate the Docker container",
+            "run": "ls ds"
+          }
+        ]
+      },
+      "last_workflow_run": {
+        "id": 7626982060,
+        "display_title": "Fix logging madness",
+        "run_number": 15,
+        "head_sha": "40b228db98449657e1542c795339556f0815d018",
+        "html_url": "https://github.com/jamespfennell/transiter/actions/runs/7626982060",
+        "created_at": "2024-01-23T14:11:25Z",
+        "updated_at": "2024-01-23T14:16:24Z"
+      },
+      "run_results": [
+        {
+          "config": {
+            "name": "Transiter",
+            "paused": false,
+            "github_user": "jamespfennell",
+            "repo": "transiter",
+            "mainline_branch": "master",
+            "auth_token": "",
+            "working_directory": null,
+            "steps": [
+              {
+                "name": "Pull Docker image",
+                "run": "ls -lah"
+              },
+              {
+                "name": "Recreate the Docker container",
+                "run": "ls ds"
+              }
+            ]
+          },
+          "started": "2024-01-24T15:46:17Z",
+          "finished": "2024-01-24T15:46:17Z",
+          "success": false,
+          "workflow_run": {
+            "id": 7626982060,
+            "display_title": "Fix logging madness",
+            "run_number": 15,
+            "head_sha": "40b228db98449657e1542c795339556f0815d018",
+            "html_url": "https://github.com/jamespfennell/transiter/actions/runs/7626982060",
+            "created_at": "2024-01-23T14:11:25Z",
+            "updated_at": "2024-01-23T14:16:24Z"
+          },
+          "steps": [
+            {
+              "config": {
+                "name": "Pull Docker image",
+                "run": "ls -lah"
+              },
+              "success": true,
+              "stdout": "total 200K\ndrwxrwxr-x  7 james james 4.0K Jan 24 10:46 .\ndrwxrwxr-x 34 james james 4.0K Dec 12 08:26 ..\n-rw-rw-r--  1 james james  23K Jan 24 10:37 Cargo.lock\n-rw-rw-r--  1 james james  320 Jan 24 10:37 Cargo.toml\n-rw-rw-r--  1 james james 1.8K Jan 24 09:54 cdagent-config.yml\n-rw-r--r--  1 james james  97K Jan 24 10:07 data.json\n-rw-rw-r--  1 james james 1.9K Jan 24 10:46 db-empty.json\n-rw-rw-r--  1 james james  10K Jan 24 10:40 db.json\n-rw-rw-r--  1 james james  399 Jan 22 19:40 Dockerfile\n-rw-rw-r--  1 james james   52 Jan 17 09:41 .dockerignore\n-rw-rw-r--  1 james james  344 Jan 14 12:52 example-config.yaml\ndrwxrwxr-x  7 james james 4.0K Jan 24 09:29 .git\ndrwxrwxr-x  3 james james 4.0K Dec 14 17:29 .github\n-rw-rw-r--  1 james james   26 Jan 24 09:29 .gitignore\n-rw-rw-r--  1 james james 1.1K Dec 14 17:29 LICENSE\n-rw-rw-r--  1 james james 1.6K Dec 14 08:22 README.md\ndrwxrwxr-x  2 james james 4.0K Jan 22 19:31 src\ndrwxrwxr-x  4 james james 4.0K Dec 14 08:19 target\ndrwxrwxr-x  2 james james 4.0K Jan 22 19:31 .vscode\n",
+              "stderr": ""
+            },
+            {
+              "config": {
+                "name": "Recreate the Docker container",
+                "run": "ls ds"
+              },
+              "success": false,
+              "stdout": "",
+              "stderr": "ls: cannot access 'ds': No such file or directory\n"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
