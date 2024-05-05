@@ -26,7 +26,13 @@ E.g., it needs to use system commands like `docker-compose`
 The solution is to use appropriate Docker file system mounts.
 
 There is of course the question of whether the agent can be used to redeploy itself and the answer
-    is unfortunately no.
+    is "not yet".
+The current problem is that the cdagent takes down the task it's redeploying, and so a redeployment
+    of itself would be interrupted.
+One potential solution is to add support to cdagent for delayed redeployments
+    (i.e., redeploy N minutes after the successful build on GitHub)
+    and then have two cdagent instances updating each other.
+One of the agents would run at a delay so that, in general, redeployments would not happen at the same time.
 
 ## License
 

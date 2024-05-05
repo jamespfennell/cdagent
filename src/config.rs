@@ -68,6 +68,11 @@ pub struct ProjectConfig {
     /// Steps to perform during a redeployment.
     #[serde(default)]
     pub steps: Vec<Step>,
+
+    /// Number of prior deployments to retain in the internal database and show on
+    /// the HTML status page.
+    #[serde(default="ten")]
+    pub retention: usize,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -77,4 +82,8 @@ pub struct Step {
 
     /// Command to run.
     pub run: String,
+}
+
+fn ten() -> usize {
+    10
 }

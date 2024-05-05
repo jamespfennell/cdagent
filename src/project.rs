@@ -76,6 +76,9 @@ impl Project {
         let finished = chrono::offset:: Utc::now();
         result.finished = finished.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         self.run_results.push(result);
+        while self.run_results.len() >= self.config.retention {
+            self.run_results.remove(0);
+        }
         Ok(())
     }
 }
