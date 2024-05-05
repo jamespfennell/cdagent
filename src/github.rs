@@ -55,7 +55,12 @@ impl Client {
             request = request.set("Authorization", &format!["Bearer {auth_token}"]);
         }
         if let Some((etag, _)) = self.data.cache.get(&url) {
-            request = request.set("if-none-match", etag)
+            request = request.set("if-none-match", etag);
+            // Adding an authorization header with a dummy value seems
+            // necessary in order for cached requests to not count against
+            // the GitHub rate limit
+            // https://stackoverflow.com/questions/60885496/github-304-responses-seem-to-count-against-rate-limit
+            request = request.set("authorization", "none");
         }
         let response = match request.call() {
             Ok(response) => response,
