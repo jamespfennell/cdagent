@@ -106,6 +106,12 @@ pre {
 
 <a href="https://github.com/{{ config.github_user }}/{{ config.repo}}">github.com/{{ config.github_user }}/{{ config.repo}}</a>
 
+{{#if pending_workflow_run }}
+
+<h4>Pending: {{ pending_workflow_run.display_title }}</h4>
+
+{{/if}}
+
 <h4>Most recent redeployments</h4>
 
 {{ #each run_results }}

@@ -50,6 +50,7 @@ projects:
   repo: texcraft
   mainline_branch: main
   working_directory: /home/james/301X-texcraft.dev
+  wait_minutes: 100000000
   steps:
   - name: Pull
     run: docker-compose pull

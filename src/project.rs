@@ -6,6 +6,7 @@ use std::process::Command;
 pub struct Project {
     pub config: crate::config::ProjectConfig,
     last_workflow_run: Option<crate::github::WorkflowRun>,
+    pending_workflow_run: Option<crate::github::WorkflowRun>,
     run_results: Vec<RunResult>,
 }
 
@@ -14,13 +15,15 @@ impl Project {
         Self {
             config,
             last_workflow_run: None,
+            pending_workflow_run: None,
             run_results: Default::default(),
         }
     }
 
     pub fn run(&mut self, github_client: &mut github::Client) -> Result<(), String> {
-        let started = chrono::offset:: Utc::now();
+        let started = chrono::offset::Utc::now();
         if self.config.paused {
+            self.pending_workflow_run = None;
             return Ok(());
         }
         let old_workflow_run = &self.last_workflow_run;
@@ -32,14 +35,35 @@ impl Project {
         )?;
         if let Some(old_workflow_run) = old_workflow_run {
             if old_workflow_run.id == new_workflow_run.id {
+                self.pending_workflow_run = None;
                 return Ok(());
             }
         }
+        let elapsed_mins = (started - new_workflow_run.updated_at).num_minutes();
+        if elapsed_mins < self.config.wait_minutes {
+            if let Some(pending_workflow_run) = &self.pending_workflow_run {
+                if pending_workflow_run.id == new_workflow_run.id {
+                    return Ok(());
+                }
+                eprintln!(
+                    "[{}] Abandoning workflow run {pending_workflow_run:#?} in favor of new workflow run.",
+                    self.config.name,
+                );
+            }
+            eprintln!(
+                "[{}] New successful workflow run found: {new_workflow_run:#?}; waiting {} minutes to redeploy.",
+                self.config.name,
+                self.config.wait_minutes - elapsed_mins,
+            );
+            self.pending_workflow_run = Some(new_workflow_run);
+            return Ok(());
+        }
         eprintln!(
-            "[{}] New successful workflow run found: {new_workflow_run:#?}",
+            "[{}] New successful workflow run found: {new_workflow_run:#?}; redeploying",
             self.config.name
         );
         self.last_workflow_run = Some(new_workflow_run.clone());
+        self.pending_workflow_run = None;
 
         let mut result = RunResult {
             config: self.config.clone(),
@@ -73,7 +97,7 @@ impl Project {
                 break;
             }
         }
-        let finished = chrono::offset:: Utc::now();
+        let finished = chrono::offset::Utc::now();
         result.finished = finished.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         self.run_results.push(result);
         while self.run_results.len() >= self.config.retention {
@@ -86,9 +110,9 @@ impl Project {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct RunResult {
     config: config::ProjectConfig,
-    #[serde(default)] 
+    #[serde(default)]
     started: String,
-    #[serde(default)] 
+    #[serde(default)]
     finished: String,
     success: bool,
     workflow_run: github::WorkflowRun,

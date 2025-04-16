@@ -71,8 +71,16 @@ pub struct ProjectConfig {
 
     /// Number of prior deployments to retain in the internal database and show on
     /// the HTML status page.
-    #[serde(default="ten")]
+    #[serde(default = "ten")]
     pub retention: usize,
+
+    /// Minutes to wait after a successful CI run before performing the redeployment.
+    ///
+    /// This can be used to perform staggered redeployments.
+    /// It can also be used to update the agent itself by having a second agent and performing
+    /// staggered redeployments of the pair.
+    #[serde(default)]
+    pub wait_minutes: i64,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

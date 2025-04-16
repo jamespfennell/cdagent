@@ -150,8 +150,8 @@ pub struct WorkflowRun {
     pub run_number: u64,
     pub head_sha: String,
     pub html_url: String,
-    pub created_at: String,
-    pub updated_at: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
