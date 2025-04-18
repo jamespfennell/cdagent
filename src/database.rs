@@ -101,6 +101,7 @@ impl Database {
         let mut tt = handlebars::Handlebars::new();
         tt.register_template_string("status.html", STATUS_DOT_HTML)
             .unwrap();
+        tt.register_helper("time_diff", Box::new(helper::time_diff));
         let rendered = tt.render("status.html", self).unwrap();
         *self.html_data.lock().unwrap() = rendered;
         Ok(())
@@ -112,5 +113,42 @@ impl Database {
 
     pub fn html_data(&self) -> sync::Arc<sync::Mutex<String>> {
         self.html_data.clone()
+    }
+}
+
+mod helper {
+    use handlebars::*;
+    pub fn time_diff(
+        h: &Helper,
+        _: &Handlebars,
+        _: &Context,
+        _: &mut RenderContext,
+        out: &mut dyn Output,
+    ) -> HelperResult {
+        let param = h.param(0).unwrap();
+        let i = param.value().render();
+        if i.is_empty() {
+            out.write("at an unknown time")?;
+            return Ok(());
+        }
+        let i = format!("\"{i}\"");
+        let t: chrono::DateTime<chrono::Utc> = serde_json::from_str(&i).unwrap();
+        let now = chrono::Utc::now();
+        if t < now {
+            let d = now - t;
+            if d.num_minutes() < 60 {
+                write!(out, "{} minutes ago", d.num_minutes())?;
+            } else if d.num_hours() < 24 {
+                write!(out, "{} hours ago", d.num_hours())?;
+            } else if d.num_days() < 15 {
+                write!(out, "{} days ago", d.num_days())?;
+            } else {
+                write!(out, "{} weeks ago", d.num_weeks())?;
+            }
+        } else {
+            let d = t - now;
+            write!(out, "in {} minutes", d.num_minutes())?;
+        }
+        Ok(())
     }
 }
