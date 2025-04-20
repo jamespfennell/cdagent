@@ -241,13 +241,6 @@ h1, h2, h3, h4 {
 
 <h2>GitHub client</h2>
 
-<h3>URLs</h3>
-
-<ul>
-  {{ #each github_client.cache as |data key| }}
-  <li>{{ key }}</li>
-  {{ /each }}
-</ul>
 <h3>Rate limiting data</h3>
 
 <table>
@@ -256,7 +249,7 @@ h1, h2, h3, h4 {
     <th>used/limit</th>
     <th>reset time</th>
   </tr>
-  {{ #each github_client.rate_limit_resource_to_infos as |info key| }}
+  {{ #each rate_limit_info.resource_to_info as |info key| }}
   <tr>
     <td>{{ info.resource }}</td>
     <td>{{ info.used }}/{{ info.limit }}</td>

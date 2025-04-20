@@ -1,136 +1,109 @@
 mod config;
 mod database;
 mod github;
+mod http;
 mod project;
-use std::sync::mpsc;
-use std::{thread, time};
+use std::sync::{mpsc, Arc};
 
 fn main() {
-    let (tx, rx) = mpsc::channel();
+    let cli = Cli::parse();
 
-    ctrlc::set_handler(move || {
-        eprintln!("received shut down signal");
-        tx.send(()).expect("Could not send signal on channel.");
-    })
-    .expect("Error setting Ctrl-C handler");
-
-    if let Err(err) = run(rx) {
+    if let Err(err) = cli.run() {
         eprintln!("Failed to run agent: {err}");
         std::process::exit(1);
     }
 }
 
-fn run(shutdown: mpsc::Receiver<()>) -> Result<(), String> {
-    let args: Vec<String> = std::env::args().collect();
-    let config_file_path = match args.get(1) {
-        None => {
-            return Err(
-                "the path to the configuration file must be provided as a CLI argument".to_string(),
-            )
-        }
-        Some(s) => s,
-    };
-    let database_path = args.get(2).cloned();
-    let config_file = match std::fs::read_to_string(config_file_path) {
-        Ok(s) => s,
-        Err(err) => {
-            return Err(format!(
-                "failed to read configuration file {config_file_path}: {err}"
-            ))
-        }
-    };
-    let config: config::Config = match serde_yaml::from_str(&config_file) {
-        Ok(config) => config,
-        Err(err) => return Err(format!("failed to parse YAML configuration file: {err}")),
-    };
-    eprintln!("Using the following config: {config:#?}");
+use clap::Parser;
 
-    let mut database = match database_path {
-        None => database::Database::new_in_memory(config),
-        Some(path) => database::Database::new_on_disk(config, &path)?,
-    };
-    let mut github_client = github::Client::new(&database);
-    let poll_interval = time::Duration::from_secs(match database.config.poll_interval_seconds {
-        None | Some(0) => 300,
-        Some(d) => d,
-    });
-    eprintln!("Using the following poll interval: {poll_interval:?}");
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    /// Path to the configuration file.
+    config: std::path::PathBuf,
 
-    let json_data = database.json_data();
-    let html_data = database.html_data();
-    thread::spawn(move || {
-        let server = tiny_http::Server::http("0.0.0.0:8000").unwrap();
-        for request in server.incoming_requests() {
-            match request.method() {
-                tiny_http::Method::Get => {}
-                _ => {
-                    let response = tiny_http::Response::empty(tiny_http::StatusCode(405));
-                    request.respond(response).unwrap();
-                    continue;
-                }
+    /// Path to the database file.
+    ///
+    /// If not specified, an in-memory database will be used.
+    #[arg(long)]
+    db: Option<std::path::PathBuf>,
+
+    /// How often to poll the GitHub API to check for new successful CI runs.
+    ///
+    /// The default is 60 seconds (1 minute).
+    ///
+    /// With a smaller number, the agent will notice new pushes faster.
+    /// However, GitHub imposes rate limits on API requests.
+    /// If this number is too small and too many requests are made,
+    ///     these rate limits may be reached.
+    /// If this happens the agent with stop polling GitHub until the cooling off period elapses.
+    /// The cooling off period is up to one hour.
+    ///
+    /// The rate limits are 60 non-cached requests per-hour if no auth token is provided,
+    ///     or 5000 non-cached requests per-hour per-GitHub-user if an auth token is provided.
+    /// Note that if there is no new information from the API (i.e., no new CI runs on mainline),
+    ///     GitHub returns a cached response that does not count towards the limit.
+    #[arg(long)]
+    pub poll_interval_secs: Option<i64>,
+}
+
+impl Cli {
+    fn run(&self) -> Result<(), String> {
+        let raw_config = match std::fs::read_to_string(&self.config) {
+            Ok(s) => s,
+            Err(err) => {
+                return Err(format!(
+                    "failed to read configuration file {}: {err}",
+                    self.config.display()
+                ))
             }
-            let (data, content_type) = match request.url() {
-                "/" | "/index.html" => (
-                    html_data.lock().unwrap().clone(),
-                    "text/html; charset=UTF-8",
-                ),
-                "/data.json" => (
-                    json_data.lock().unwrap().clone(),
-                    "application/json; charset=UTF-8",
-                ),
-                _ => {
-                    let response = tiny_http::Response::empty(tiny_http::StatusCode(404));
-                    request.respond(response).unwrap();
-                    continue;
-                }
-            };
-            let header = tiny_http::Header::from_bytes("Content-Type", content_type).unwrap();
-            let response = tiny_http::Response::from_string(data).with_header(header);
-            request.respond(response).unwrap();
-        }
-    });
-
-    loop {
-        let start = time::SystemTime::now();
-
-        for project in database.projects.iter_mut() {
-            if shutdown.try_recv().is_ok() {
-                eprintln!(
-                    "running project {} interrupted because of shut down signal",
-                    project.config.name
-                );
-                // We don't return immediately but instead try to persist progress in the database
-                // before exiting.
-                break;
-            }
-            if let Err(err) = project.run(&mut github_client) {
-                eprintln!(
-                    "Failed to run one iteration for project {}: {err}",
-                    project.config.name
-                )
-            }
-        }
-        github_client.persist(&mut database);
-        if let Err(err) = database.checkpoint() {
-            eprintln!("Failed to checkpoint database: {err}");
-        }
-
-        let end = time::SystemTime::now();
-        let loop_duration = match end.duration_since(start) {
-            Ok(d) => d,
-            Err(_) => time::Duration::ZERO,
         };
-        match poll_interval.checked_sub(loop_duration) {
-            Some(remaining) => {
-                if shutdown.recv_timeout(remaining).is_ok() {
-                    eprintln!("sleep interrupted because of shut down signal");
-                    break;
+        let config: config::Config = match serde_yaml::from_str(&raw_config) {
+            Ok(config) => config,
+            Err(err) => return Err(format!("failed to parse YAML configuration file: {err}")),
+        };
+        eprintln!(
+            "[main] loaded the configuration containing {} projects",
+            config.projects.len()
+        );
+
+        let poll_interval = chrono::Duration::seconds(match self.poll_interval_secs {
+            None | Some(0) => 300,
+            Some(d) => d,
+        });
+        eprintln!("[main] using the following poll interval: {poll_interval:?}");
+
+        let db: Arc<dyn database::DB> = match &self.db {
+            None => Arc::new(database::new_in_memory_db()),
+            Some(path) => match database::new_on_disk_db(path.clone().into()) {
+                Ok(db) => Arc::new(db),
+                Err(err) => {
+                    return Err(format!("failed to load DB from {}: {err}", path.display()));
                 }
-            }
-            None => {
-                eprintln!("Time to poll all projects ({loop_duration:?}) was longer than the poll interval ({poll_interval:?}). Will poll again immediately");
-            }
-        }
+            },
+        };
+        let github_client = Arc::new(github::Client::new(db.clone()));
+        let project_manager = Arc::new(project::Manager::create_and_start(
+            db.clone(),
+            github_client.clone(),
+            config.projects,
+            poll_interval,
+        ));
+        let http_service =
+            http::Service::create_and_start(github_client.clone(), project_manager.clone());
+
+        // Block until Ctrl+C or similar shutdown signal
+        let (tx, rx) = mpsc::channel();
+        ctrlc::set_handler(move || {
+            eprintln!("[main] received shutdown signal");
+            tx.send(()).unwrap();
+        })
+        .unwrap();
+        rx.recv().unwrap();
+        eprintln!("[main] starting shutdown sequence");
+        http_service.shutdown();
+        Arc::into_inner(project_manager).unwrap().shutdown();
+        eprintln!("[main] done");
+        Ok(())
     }
-    Ok(())
 }

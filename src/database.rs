@@ -1,154 +1,227 @@
 //! A simple database for persisting data across runs of the agent.
 
-use std::collections::HashMap;
-use std::sync;
+use std::collections::{BTreeMap, HashMap};
+use std::{fs, sync};
 
-static STATUS_DOT_HTML: &str = include_str!("status.html");
+pub trait DB: Send + Sync {
+    fn get(&self, key: &str) -> Option<String>;
 
-/// A simple database for persisting data across runs of the agent.
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct Database {
-    #[serde(skip)]
-    path: Option<String>,
-    #[serde(skip)]
-    json_data: sync::Arc<sync::Mutex<String>>,
-    #[serde(skip)]
-    html_data: sync::Arc<sync::Mutex<String>>,
-    pub config: crate::config::Config,
-    pub github_client: crate::github::Data,
-    pub projects: Vec<crate::project::Project>,
+    fn set(&self, key: String, value: String);
 }
 
-impl Database {
-    /// Create a new in-memory database.
-    pub fn new_in_memory(config: crate::config::Config) -> Self {
-        Self {
-            path: None,
-            json_data: Default::default(),
-            html_data: Default::default(),
-            config,
-            github_client: Default::default(),
-            projects: Default::default(),
+pub fn get_typed<T: serde::de::DeserializeOwned>(
+    db: &dyn DB,
+    key: &str,
+) -> serde_json::Result<Option<T>> {
+    let Some(raw) = db.get(key) else {
+        return Ok(None);
+    };
+    let t: T = serde_json::from_str(&raw)?;
+    Ok(Some(t))
+}
+
+pub fn set_typed<T: serde::Serialize>(
+    db: &dyn DB,
+    key: String,
+    value: &T,
+) -> serde_json::Result<()> {
+    let raw = serde_json::to_string_pretty(&value)?;
+    db.set(key, raw);
+    Ok(())
+}
+
+pub fn new_in_memory_db() -> impl DB {
+    InMemoryDB::default()
+}
+
+#[derive(Default)]
+struct InMemoryDB {
+    m: sync::Mutex<HashMap<String, String>>,
+}
+
+impl DB for InMemoryDB {
+    fn get(&self, key: &str) -> Option<String> {
+        self.m.lock().unwrap().get(key).cloned()
+    }
+    fn set(&self, key: String, value: String) {
+        self.m.lock().unwrap().insert(key, value);
+    }
+}
+
+pub fn new_on_disk_db(path: std::path::PathBuf) -> Result<impl DB, OnDiskDBPathError> {
+    OnDiskDB::load(path)
+}
+
+/// Error when loading an on-disk database.
+#[derive(Debug)]
+pub enum OnDiskDBPathError {
+    MissingFileName,
+    IO(std::io::Error),
+}
+
+impl std::fmt::Display for OnDiskDBPathError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use OnDiskDBPathError::*;
+        match self {
+            MissingFileName => write!(f, "path points to a directory and not a file"),
+            IO(error) => write!(f, "IO error: {error}"),
         }
     }
+}
 
-    /// Create a new on-disk database.
-    ///
-    /// If there is not file at the provided path, a new database will be provisioned.
-    ///
-    /// This constructor fails if there is an IO error when reading the path,
-    ///     or if the file is not valid JSON.
-    pub fn new_on_disk(config: crate::config::Config, path: &str) -> Result<Self, String> {
-        let mut database: Self = match std::fs::read_to_string(path) {
-            Ok(json) => {
-                let mut database: Self = match serde_json::from_str(&json) {
-                    Ok(values) => values,
-                    Err(err) => return Err(format!("database file is corrupt: {err}. Consider deleting the file to initialize a new database"))
-                };
-                database.config = config;
-                database
-            }
+struct OnDiskDB {
+    path: std::path::PathBuf,
+    tmp_path: std::path::PathBuf,
+    m: sync::Mutex<BTreeMap<String, String>>,
+}
+
+impl OnDiskDB {
+    fn load(path: std::path::PathBuf) -> Result<Self, OnDiskDBPathError> {
+        let tmp_path = {
+            let Some(file_name) = path.file_name() else {
+                return Err(OnDiskDBPathError::MissingFileName);
+            };
+            let mut file_name = file_name.to_os_string();
+            file_name.push(".tmp");
+            let mut tmp_path = path.clone();
+            tmp_path.set_file_name(file_name);
+            tmp_path
+        };
+        let m: BTreeMap<String, String> = match fs::read_to_string(&path) {
+            Ok(data) => parse_db_file(&data),
             Err(err) => {
                 if err.kind() == std::io::ErrorKind::NotFound {
-                    eprintln!("Database file {path} doesn't exist; initializing new database");
-                    Self::new_in_memory(config)
+                    eprintln!(
+                        "Database file {} doesn't exist; initializing new database",
+                        path.display()
+                    );
+                    Default::default()
                 } else {
-                    return Err(format!("failed to open database file: {err}"));
+                    return Err(OnDiskDBPathError::IO(err));
                 }
             }
         };
-        database.path = Some(path.to_string());
-        let mut existing_projects: Vec<crate::project::Project> = vec![];
-        std::mem::swap(&mut existing_projects, &mut database.projects);
-        let mut name_to_existing_project: HashMap<String, crate::project::Project> =
-            existing_projects
-                .into_iter()
-                .map(|p| (p.config.name.clone(), p))
-                .collect();
-        database.projects = database
-            .config
-            .projects
-            .iter()
-            .map(|c| match name_to_existing_project.remove(&c.name) {
-                None => crate::project::Project::new(c.clone()),
-                Some(mut project) => {
-                    project.config = c.clone();
-                    project
-                }
-            })
-            .collect();
-        database
-            .projects
-            .sort_by_key(|p| p.config.name.clone().to_lowercase());
-        database.checkpoint()?;
-        Ok(database)
-    }
-
-    /// Checkpoint the database by writing its full state to disk.
-    ///
-    /// This is a no-op for in-memory databases.
-    pub fn checkpoint(&self) -> Result<(), String> {
-        let content =
-            serde_json::to_string_pretty(&self).expect("failed to serialize database values");
-        if let Some(path) = &self.path {
-            match std::fs::write(path, &content) {
-                Ok(()) => (),
-                Err(err) => return Err(format!("failed to write database: {err}")),
-            };
-        }
-        *self.json_data.lock().unwrap() = content;
-
-        let mut tt = handlebars::Handlebars::new();
-        tt.register_template_string("status.html", STATUS_DOT_HTML)
-            .unwrap();
-        tt.register_helper("time_diff", Box::new(helper::time_diff));
-        let rendered = tt.render("status.html", self).unwrap();
-        *self.html_data.lock().unwrap() = rendered;
-        Ok(())
-    }
-
-    pub fn json_data(&self) -> sync::Arc<sync::Mutex<String>> {
-        self.json_data.clone()
-    }
-
-    pub fn html_data(&self) -> sync::Arc<sync::Mutex<String>> {
-        self.html_data.clone()
+        Ok(OnDiskDB {
+            path,
+            tmp_path,
+            m: sync::Mutex::new(m),
+        })
     }
 }
 
-mod helper {
-    use handlebars::*;
-    pub fn time_diff(
-        h: &Helper,
-        _: &Handlebars,
-        _: &Context,
-        _: &mut RenderContext,
-        out: &mut dyn Output,
-    ) -> HelperResult {
-        let param = h.param(0).unwrap();
-        let i = param.value().render();
-        if i.is_empty() {
-            out.write("at an unknown time")?;
-            return Ok(());
-        }
-        let i = format!("\"{i}\"");
-        let t: chrono::DateTime<chrono::Utc> = serde_json::from_str(&i).unwrap();
-        let now = chrono::Utc::now();
-        if t < now {
-            let d = now - t;
-            if d.num_minutes() < 60 {
-                write!(out, "{} minutes ago", d.num_minutes())?;
-            } else if d.num_hours() < 24 {
-                write!(out, "{} hours ago", d.num_hours())?;
-            } else if d.num_days() < 15 {
-                write!(out, "{} days ago", d.num_days())?;
-            } else {
-                write!(out, "{} weeks ago", d.num_weeks())?;
+fn parse_db_file(s: &str) -> BTreeMap<String, String> {
+    let mut m: BTreeMap<String, String> = Default::default();
+    let mut offset = 0_usize;
+    let mut current_key: Option<(String, usize)> = None;
+    let mut iter = s.split_inclusive('\n');
+    loop {
+        let line_or = iter.next();
+        let flush_or = match line_or {
+            None => current_key.take(),
+            Some(line) => match line.strip_prefix("// key=") {
+                None => None,
+                Some(new_key) => {
+                    let old = current_key.take();
+                    current_key = Some((new_key.trim_end().to_string(), offset + line.len()));
+                    old
+                }
+            },
+        };
+        if let Some((key, val_start)) = flush_or {
+            let val = s[val_start..offset].to_string();
+            m.insert(key, val);
+        };
+        match line_or {
+            None => break,
+            Some(line) => {
+                offset += line.len();
             }
-        } else {
-            let d = t - now;
-            write!(out, "in {} minutes", d.num_minutes())?;
         }
-        Ok(())
+    }
+    m
+}
+
+impl DB for OnDiskDB {
+    fn get(&self, key: &str) -> Option<String> {
+        self.m.lock().unwrap().get(key).cloned()
+    }
+    fn set(&self, key: String, value: String) {
+        let mut m = self.m.lock().unwrap();
+        use std::collections::btree_map::Entry;
+        match m.entry(key) {
+            Entry::Vacant(vacant_entry) => {
+                vacant_entry.insert(value);
+            },
+            Entry::Occupied(mut occupied_entry) => {
+                if occupied_entry.get().eq(&value) {
+                    // Value hasn't changed.
+                    // Exit early without writing change to disk.
+                    return;
+                }
+                *occupied_entry.get_mut() = value;
+            },
+        }
+        let mut buf = String::new();
+        for (k, v) in &*m {
+            use std::fmt::Write;
+            writeln!(&mut buf, "// key={k}\n{v}").unwrap();
+        }
+        match std::fs::write(&self.tmp_path, &buf) {
+            Ok(()) => (),
+            Err(err) => {
+                println!(
+                    "Failed to write database to {}: {err}",
+                    self.tmp_path.display()
+                );
+                return;
+            }
+        };
+        match std::fs::rename(&self.tmp_path, &self.path) {
+            Ok(()) => (),
+            Err(err) => {
+                println!(
+                    "Failed to finalize database from {} to {}: {err}",
+                    self.tmp_path.display(),
+                    self.path.display()
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+    struct TestStruct {
+        field_1: i32,
+        field_2: Vec<bool>,
+    }
+    #[test]
+    fn on_disk_db() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("rollouts_on_disk_db.json");
+        std::fs::remove_file(path.clone()).unwrap();
+
+        let db = new_on_disk_db(path.clone()).unwrap();
+        let key_1 = "string".to_string();
+        let val_1 = "value".to_string();
+        let key_2 = "struct".to_string();
+        let val_2 = TestStruct {
+            field_1: 32,
+            field_2: vec![true, true, false],
+        };
+
+        assert_eq!(get_typed::<String>(&db, &key_1).unwrap(), None);
+        set_typed(&db, key_1.clone(), &val_1).unwrap();
+        set_typed(&db, key_2.clone(), &val_2).unwrap();
+
+        assert_eq!(get_typed(&db, &key_1).unwrap(), Some(val_1.clone()));
+        assert_eq!(get_typed(&db, &key_2).unwrap(), Some(val_2.clone()));
+
+        let db = new_on_disk_db(path).unwrap();
+        assert_eq!(get_typed(&db, &key_1).unwrap(), Some(val_1));
+        assert_eq!(get_typed(&db, &key_2).unwrap(), Some(val_2));
     }
 }

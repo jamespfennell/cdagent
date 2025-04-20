@@ -1,5 +1,6 @@
 //! A GitHub client.
 
+use std::sync::{self, Arc};
 use std::time;
 use std::{collections::HashMap, time::Duration};
 
@@ -11,23 +12,28 @@ use crate::database;
 ///     and tries to cache requests using the HTTP etag header.
 pub struct Client {
     agent: ureq::Agent,
-    data: Data,
-}
-
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct Data {
-    cache: HashMap<String, (String, WorkflowRun)>,
-    rate_limit_resource_to_infos: HashMap<String, RateLimitInfo>,
-    auth_token_to_rate_limit_resource: HashMap<String, String>,
+    cache: sync::Mutex<HashMap<String, (String, WorkflowRun)>>,
+    rate_limiter: sync::Mutex<RateLimiter>,
+    db: Arc<dyn database::DB>,
 }
 
 impl Client {
-    pub fn new(database: &database::Database) -> Self {
+    pub fn new(db: Arc<dyn database::DB>) -> Self {
         let agent = ureq::AgentBuilder::new()
             .timeout(Duration::from_millis(1000))
             .build();
-        let data = database.github_client.clone();
-        Self { agent, data }
+        let cache = sync::Mutex::new(
+            database::get_typed(db.as_ref(), "github_client/cache")
+                .unwrap()
+                .unwrap_or_default(),
+        );
+        let rate_limiter = sync::Mutex::new(RateLimiter::new(db.as_ref()));
+        Self {
+            agent,
+            cache,
+            rate_limiter,
+            db,
+        }
     }
 
     /// Get the latest successful workflow run for the provided repo in branch.
@@ -37,13 +43,13 @@ impl Client {
     /// The provided auth token can be empty.
     /// See the commands on the auth token config for more information about this.
     pub fn get_latest_successful_workflow_run(
-        &mut self,
+        &self,
         user: &str,
         repo: &str,
         branch: &str,
         auth_token: &str,
     ) -> Result<WorkflowRun, String> {
-        self.check_for_rate_limiting(auth_token)?;
+        self.rate_limiter.lock().unwrap().check(auth_token)?;
 
         let url = format!["https://api.github.com/repos/{user}/{repo}/actions/runs?branch={branch}&event=push&status=success&per_page=1&exclude_pull_requests=true"];
         let mut request = self
@@ -54,7 +60,7 @@ impl Client {
         if !auth_token.is_empty() {
             request = request.set("Authorization", &format!["Bearer {auth_token}"]);
         }
-        if let Some((etag, _)) = self.data.cache.get(&url) {
+        if let Some((etag, _)) = self.cache.lock().unwrap().get(&url) {
             request = request.set("if-none-match", etag);
             // Adding an authorization header with a dummy value seems
             // necessary in order for cached requests to not count against
@@ -66,17 +72,13 @@ impl Client {
             Ok(response) => response,
             Err(err) => return Err(format!("failed to make GitHub API request: {err}")),
         };
-        if let Some(rate_limit_info) = RateLimitInfo::build(&response) {
-            self.data
-                .auth_token_to_rate_limit_resource
-                .insert(auth_token.to_string(), rate_limit_info.resource.clone());
-            self.data
-                .rate_limit_resource_to_infos
-                .insert(rate_limit_info.resource.clone(), rate_limit_info);
-        }
+        self.rate_limiter
+            .lock()
+            .unwrap()
+            .update(self.db.as_ref(), auth_token, &response);
 
         if response.status() == 304 {
-            if let Some((_, workflow_run)) = self.data.cache.get(&url) {
+            if let Some((_, workflow_run)) = self.cache.lock().unwrap().get(&url) {
                 return Ok(workflow_run.clone());
             }
         }
@@ -98,43 +100,29 @@ impl Client {
             Some(workflow_run) => workflow_run,
             None => return Err("GitHub actions has no successful runs".to_string()),
         };
-        if let Some((old_etag, cached_workflow_run)) = self.data.cache.get(&url) {
+
+        // Update the cache before exiting.
+        let mut cache = self.cache.lock().unwrap();
+        if let Some((old_etag, cached_workflow_run)) = cache.get(&url) {
             if workflow_run.created_at < cached_workflow_run.created_at {
                 return Err(format!["GitHub returned a stale workflow run! old_etag={old_etag}, new_etag={etag:?},\ncached_workflow={cached_workflow_run:#?}\nbody=<begin>\n{body}\n<end>"]);
             }
         }
-
         if let Some(etag) = etag {
-            self.data.cache.insert(url, (etag, workflow_run.clone()));
+            cache.insert(url, (etag, workflow_run.clone()));
         }
+        use std::ops::Deref;
+        database::set_typed(
+            self.db.as_ref(),
+            "github_client/cache".to_string(),
+            cache.deref(),
+        )
+        .unwrap();
         Ok(workflow_run)
     }
 
-    fn check_for_rate_limiting(&self, auth_token: &str) -> Result<(), String> {
-        let resource = match self.data.auth_token_to_rate_limit_resource.get(auth_token) {
-            None => return Ok(()),
-            Some(resource) => resource,
-        };
-        let info = match self.data.rate_limit_resource_to_infos.get(resource) {
-            None => return Ok(()),
-            Some(info) => info,
-        };
-        if info.remaining > 0 {
-            return Ok(());
-        }
-        let current_timestamp = time::SystemTime::now()
-            .duration_since(time::UNIX_EPOCH)
-            .expect("current time should be after the Unix epoch")
-            .as_secs();
-        let seconds_to_reset = match info.reset.checked_sub(current_timestamp) {
-            None => return Ok(()),
-            Some(s) => s,
-        };
-        Err(format!("reached GitHub API rate limit for this auth token; resource={resource}, limit={}, seconds_to_reset={seconds_to_reset}", info.limit))
-    }
-
-    pub fn persist(&self, database: &mut database::Database) {
-        database.github_client = self.data.clone();
+    pub fn rate_limit_info(&self) -> RateLimiter {
+        self.rate_limiter.lock().unwrap().clone()
     }
 }
 
@@ -152,6 +140,52 @@ pub struct WorkflowRun {
     pub html_url: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Clone, Default, Debug, serde::Serialize, serde::Deserialize)]
+pub struct RateLimiter {
+    auth_token_to_resource: HashMap<String, String>,
+    resource_to_info: HashMap<String, RateLimitInfo>,
+}
+
+impl RateLimiter {
+    fn new(db: &dyn database::DB) -> Self {
+        database::get_typed(db, "github_client/rate_limiter")
+            .unwrap()
+            .unwrap_or_default()
+    }
+    fn check(&self, auth_token: &str) -> Result<(), String> {
+        let resource = match self.auth_token_to_resource.get(auth_token) {
+            None => return Ok(()),
+            Some(resource) => resource,
+        };
+        let info = match self.resource_to_info.get(resource) {
+            None => return Ok(()),
+            Some(info) => info,
+        };
+        if info.remaining > 0 {
+            return Ok(());
+        }
+        let current_timestamp = time::SystemTime::now()
+            .duration_since(time::UNIX_EPOCH)
+            .expect("current time should be after the Unix epoch")
+            .as_secs();
+        let seconds_to_reset = match info.reset.checked_sub(current_timestamp) {
+            None => return Ok(()),
+            Some(s) => s,
+        };
+        Err(format!("reached GitHub API rate limit for this auth token; resource={resource}, limit={}, seconds_to_reset={seconds_to_reset}", info.limit))
+    }
+    fn update(&mut self, db: &dyn database::DB, auth_token: &str, response: &ureq::Response) {
+        let Some(rate_limit_info) = RateLimitInfo::build(&response) else {
+            return;
+        };
+        self.auth_token_to_resource
+            .insert(auth_token.to_string(), rate_limit_info.resource.clone());
+        self.resource_to_info
+            .insert(rate_limit_info.resource.clone(), rate_limit_info);
+        database::set_typed(db, "github_client/rate_limiter".to_string(), self).unwrap();
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

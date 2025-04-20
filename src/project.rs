@@ -1,8 +1,124 @@
 use crate::config;
+use crate::database;
 use crate::github;
 use std::process::Command;
+use std::sync;
+use std::sync::mpsc;
+use std::sync::Arc;
+use std::thread;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+pub struct Manager {
+    tx: mpsc::Sender<()>,
+    main_thread: thread::JoinHandle<()>,
+    projects: Arc<sync::Mutex<Vec<Project>>>,
+}
+
+impl Manager {
+    pub fn create_and_start(
+        db: Arc<dyn database::DB>,
+        github_client: Arc<github::Client>,
+        projects: Vec<config::ProjectConfig>,
+        poll_interval: chrono::Duration,
+    ) -> Self {
+        let (tx, rx) = mpsc::channel();
+        let projects: Vec<Project> = projects
+            .into_iter()
+            .map(|project| {
+                database::get_typed(
+                    db.as_ref(),
+                    &format!["project_manager/projects/{}", project.name],
+                )
+                .unwrap()
+                .unwrap_or_else(|| Project::new(project))
+            })
+            .collect();
+        let projects = Arc::new(sync::Mutex::new(projects));
+        let worker = Worker {
+            db,
+            github_client,
+            projects: projects.clone(),
+            poll_interval,
+            rx,
+        };
+        let main_thread = thread::spawn(move || {
+            worker.run();
+        });
+        Self {
+            tx,
+            main_thread,
+            projects,
+        }
+    }
+
+    pub fn shutdown(self) {
+        eprintln!("[project_manager] shutdown signal received");
+        self.tx.send(()).unwrap();
+        eprintln!("[project_manager] signalled to work thread; waiting to stop");
+        self.main_thread.join().unwrap();
+        eprintln!("[project_manager] shutdown complete");
+    }
+
+    pub fn projects(&self) -> Vec<Project> {
+        (*self.projects.lock().unwrap()).clone()
+    }
+}
+
+pub struct Worker {
+    db: Arc<dyn database::DB>,
+    github_client: Arc<github::Client>,
+    projects: Arc<sync::Mutex<Vec<Project>>>,
+    poll_interval: chrono::Duration,
+    rx: mpsc::Receiver<()>,
+}
+
+impl Worker {
+    fn run(self) {
+        eprintln!("[project_manager] work thread started");
+        loop {
+            let start = chrono::Utc::now();
+
+            let mut projects = (*self.projects.lock().unwrap()).clone();
+            for project in &mut projects {
+                if self.rx.try_recv().is_ok() {
+                    eprintln!(
+                        "[project_manager] running project {} interrupted because of shut down signal",
+                        project.config.name,
+                    );
+                    return;
+                }
+                if let Err(err) = project.run(self.github_client.as_ref()) {
+                    eprintln!(
+                        "Failed to run one iteration for project {}: {err}",
+                        project.config.name
+                    );
+                }
+                database::set_typed(
+                    self.db.as_ref(),
+                    format!("project_manager/projects/{}", project.config.name),
+                    project,
+                )
+                .unwrap();
+            }
+            *self.projects.lock().unwrap() = projects;
+            let loop_duration = chrono::Utc::now() - start;
+            match self.poll_interval.checked_sub(&loop_duration) {
+                Some(remaining) => {
+                    if self.rx.recv_timeout(remaining.to_std().unwrap()).is_ok() {
+                        eprintln!(
+                            "[project_manager] sleep interrupted because of shut down signal"
+                        );
+                        return;
+                    }
+                }
+                None => {
+                    eprintln!("[project_manager] time to poll all projects ({loop_duration:?}) was longer than the poll interval ({:?}). Will poll again immediately", self.poll_interval);
+                }
+            }
+        }
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Project {
     pub config: crate::config::ProjectConfig,
     last_workflow_run: Option<crate::github::WorkflowRun>,
@@ -20,7 +136,7 @@ impl Project {
         }
     }
 
-    pub fn run(&mut self, github_client: &mut github::Client) -> Result<(), String> {
+    pub fn run(&mut self, github_client: &github::Client) -> Result<(), String> {
         let started = chrono::offset::Utc::now();
         if self.config.paused {
             self.pending_workflow_run = None;
@@ -67,8 +183,8 @@ impl Project {
 
         let mut result = RunResult {
             config: self.config.clone(),
-            started: started.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-            finished: "".to_string(),
+            started,
+            finished: started,
             success: true,
             workflow_run: new_workflow_run,
             steps: vec![],
@@ -88,17 +204,27 @@ impl Project {
             if let Some(working_directory) = &self.config.working_directory {
                 command.current_dir(working_directory);
             }
-            let output = command.output().expect("failed to wait for subprocess");
-            let step_result = StepResult::new(step, &output);
+            let step_result = match command.output() {
+                Ok(output) => {
+                    StepResult::new(step, &output)
+                },
+                Err(err) => {
+                    StepResult{
+                        config:step.clone(),
+                        success:false,
+                        stderr: format!("Failed to start command.\nThis is probably an error in the project configuration.\nError: {err}"),
+                    }
+                },
+            };
+            let success = step_result.success;
             result.steps.push(step_result);
-            if !output.status.success() {
+            if !success {
                 result.success = false;
                 eprintln!("failed to run command: {:?}", result);
                 break;
             }
         }
-        let finished = chrono::offset::Utc::now();
-        result.finished = finished.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        result.finished = chrono::offset::Utc::now();
         self.run_results.push(result);
         while self.run_results.len() >= self.config.retention {
             self.run_results.remove(0);
@@ -111,9 +237,9 @@ impl Project {
 struct RunResult {
     config: config::ProjectConfig,
     #[serde(default)]
-    started: String,
+    started: chrono::DateTime<chrono::Utc>,
     #[serde(default)]
-    finished: String,
+    finished: chrono::DateTime<chrono::Utc>,
     success: bool,
     workflow_run: github::WorkflowRun,
     steps: Vec<StepResult>,
@@ -123,7 +249,6 @@ struct RunResult {
 struct StepResult {
     config: config::Step,
     success: bool,
-    stdout: String,
     stderr: String,
 }
 
@@ -132,7 +257,6 @@ impl StepResult {
         Self {
             config: step.clone(),
             success: output.status.success(),
-            stdout: vec_to_string(&output.stdout),
             stderr: vec_to_string(&output.stderr),
         }
     }

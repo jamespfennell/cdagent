@@ -5,23 +5,6 @@
 pub struct Config {
     /// List of projects to run the agent for.
     pub projects: Vec<ProjectConfig>,
-
-    /// How often to poll the GitHub API to check for new successful CI runs.
-    ///
-    /// The default is 300 seconds (5 minutes).
-    ///
-    /// With a smaller number, the agent will notice new pushes faster.
-    /// However, GitHub imposes rate limits on API requests.
-    /// If this number is too small and too many requests are made,
-    ///     these rate limits may be reached.
-    /// If this happens the agent with stop polling GitHub until the cooling off period elapses.
-    /// The cooling off period is up to one hour.
-    ///
-    /// The rate limits are 60 non-cached requests per-hour if no auth token is provided,
-    ///     or 5000 non-cached requests per-hour per-GitHub-user if an auth token is provided.
-    /// Note that if there is no new information from the API (i.e., no new CI runs on mainline),
-    ///     GitHub returns a cached response that does not count towards the limit.
-    pub poll_interval_seconds: Option<u64>,
 }
 
 /// A project to run the agent for.
