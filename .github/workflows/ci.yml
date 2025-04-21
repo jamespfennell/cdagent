@@ -23,6 +23,6 @@ jobs:
         id: docker_build
         uses: docker/build-push-action@v4
         with:
-          tags: jamespfennell/cdagent:latest
+          tags: jamespfennell/rollouts:latest
           # Only push to Docker Hub if this workflow is a push to main
           push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}

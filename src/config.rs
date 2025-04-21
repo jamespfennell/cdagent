@@ -45,7 +45,7 @@ pub struct ProjectConfig {
 
     /// Working directory in which to run the redeployment steps.
     ///
-    /// Defaults to the working directory of the cdagent invocation.
+    /// Defaults to the working directory in which the agent was started.
     pub working_directory: Option<String>,
 
     /// Steps to perform during a redeployment.

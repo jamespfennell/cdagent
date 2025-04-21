@@ -121,22 +121,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cdagent"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "ctrlc",
- "handlebars",
- "serde",
- "serde_json",
- "serde_yaml",
- "shlex",
- "tiny_http",
- "ureq",
-]
-
-[[package]]
 name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -539,6 +523,22 @@ dependencies = [
  "spin",
  "untrusted",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "rollouts"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "ctrlc",
+ "handlebars",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "shlex",
+ "tiny_http",
+ "ureq",
 ]
 
 [[package]]

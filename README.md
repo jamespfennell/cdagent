@@ -1,6 +1,6 @@
-# Continuous deployment agent
+# Rollouts agent
 
-This is a WIP agent that runs on my VMs and implements continuous deployment for my lower risk projects.
+This is an agent that runs on my VMs and implements continuous deployment for my projects.
 
 The agent watches a number of GitHub repositories.
 Whenever there is a new successful GitHub actions run on mainline, 
@@ -19,20 +19,17 @@ To run the agent in the repository root, simply run `cargo run -- $PATH_TO_CONFI
 ## Deploying the agent
 
 As with all my projects, the agent is deployed using Docker.
-This introduces some challenges as the vanilla Dockerized deployment of the agent is, of course, sandboxed by default.
+This introduces some challenges as the vanilla Dockerized deployment of the agent is sandboxed by default.
 The agent generally needs access to many system resources in order to redeploy the configured projects
 E.g., it needs to use system commands like `docker-compose`
     and it needs read various `compose.yaml` files on the filesystem.
 The solution is to use appropriate Docker file system mounts.
 
-There is of course the question of whether the agent can be used to redeploy itself and the answer
-    is "not yet".
-The current problem is that the cdagent takes down the task it's redeploying, and so a redeployment
-    of itself would be interrupted.
-One potential solution is to add support to cdagent for delayed redeployments
-    (i.e., redeploy N minutes after the successful build on GitHub)
-    and then have two cdagent instances updating each other.
-One of the agents would run at a delay so that, in general, redeployments would not happen at the same time.
+The agent can be used to update itself.
+The tricks is to run a _pair_ of agents, which update each other.
+One of the pair is configured to redeploy after a delay
+    (using the `wait_minutes` config field)
+    to avoid concurrent rollouts.
 
 ## License
 
