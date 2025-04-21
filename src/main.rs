@@ -3,7 +3,7 @@ mod database;
 mod github;
 mod http;
 mod project;
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 
 fn main() {
     let cli = Cli::parse();
@@ -73,36 +73,41 @@ impl Cli {
         });
         eprintln!("[main] using the following poll interval: {poll_interval:?}");
 
-        let db: Arc<dyn database::DB> = match &self.db {
-            None => Arc::new(database::new_in_memory_db()),
-            Some(path) => match database::new_on_disk_db(path.clone().into()) {
-                Ok(db) => Arc::new(db),
+        let db: Box<dyn database::DB> = match &self.db {
+            None => Box::new(database::new_in_memory_db()),
+            Some(path) => match database::new_on_disk_db(path.clone()) {
+                Ok(db) => Box::new(db),
                 Err(err) => {
                     return Err(format!("failed to load DB from {}: {err}", path.display()));
                 }
             },
         };
-        let github_client = Arc::new(github::Client::new(db.clone()));
-        let project_manager = Arc::new(project::Manager::create_and_start(
-            db.clone(),
-            github_client.clone(),
+        let github_client = github::Client::new(db.as_ref());
+        let project_manager = project::Manager::create_and_start(
+            db.as_ref(),
+            &github_client,
             config.projects,
             poll_interval,
-        ));
-        let http_service =
-            http::Service::create_and_start(github_client.clone(), project_manager.clone());
+        );
+        let http_service = http::Service::new(&github_client, &project_manager);
 
-        // Block until Ctrl+C or similar shutdown signal
-        let (tx, rx) = mpsc::channel();
-        ctrlc::set_handler(move || {
-            eprintln!("[main] received shutdown signal");
-            tx.send(()).unwrap();
-        })
-        .unwrap();
-        rx.recv().unwrap();
-        eprintln!("[main] starting shutdown sequence");
-        http_service.shutdown();
-        Arc::into_inner(project_manager).unwrap().shutdown();
+        std::thread::scope(|s| {
+            let stopper_1 = http_service.start(s);
+            let stopper_2 = project_manager.start(s);
+
+            // Block until Ctrl+C or similar shutdown signal
+            let (tx, rx) = mpsc::channel();
+            ctrlc::set_handler(move || {
+                eprintln!("[main] received shutdown signal");
+                tx.send(()).unwrap();
+            })
+            .unwrap();
+            rx.recv().unwrap();
+
+            eprintln!("[main] starting shutdown sequence");
+            stopper_1.stop();
+            stopper_2.stop();
+        });
         eprintln!("[main] done");
         Ok(())
     }

@@ -151,7 +151,7 @@ impl DB for OnDiskDB {
         match m.entry(key) {
             Entry::Vacant(vacant_entry) => {
                 vacant_entry.insert(value);
-            },
+            }
             Entry::Occupied(mut occupied_entry) => {
                 if occupied_entry.get().eq(&value) {
                     // Value hasn't changed.
@@ -159,7 +159,7 @@ impl DB for OnDiskDB {
                     return;
                 }
                 *occupied_entry.get_mut() = value;
-            },
+            }
         }
         let mut buf = String::new();
         for (k, v) in &*m {

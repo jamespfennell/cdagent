@@ -1,28 +1,34 @@
 //! Module http contains a HTTP service that exposes status information about the agent.
 
 use std::sync;
-use std::sync::Arc;
 use std::thread;
 
 use crate::{github, project};
 
-pub struct Service {
-    server: sync::Arc<tiny_http::Server>,
-    listening_thread: thread::JoinHandle<()>,
+pub struct Service<'a> {
+    github_client: &'a github::Client<'a>,
+    project_manager: &'a project::Manager<'a>,
+    templates: handlebars::Handlebars<'static>,
 }
 
-impl Service {
-    pub fn create_and_start(
-        github_client: Arc<github::Client>,
-        project_manager: Arc<project::Manager>,
-    ) -> Self {
-        let server = sync::Arc::new(tiny_http::Server::http("0.0.0.0:8000").unwrap());
-        let server_cloned = server.clone();
-        let handlers = Handlers {
+impl<'a> Service<'a> {
+    pub fn new(github_client: &'a github::Client, project_manager: &'a project::Manager) -> Self {
+        let mut templates = handlebars::Handlebars::new();
+        templates.set_strict_mode(true);
+        templates
+            .register_template_string("status.html", STATUS_DOT_HTML)
+            .unwrap();
+        templates.register_helper("time_diff", Box::new(helper::time_diff));
+        Self {
             github_client,
             project_manager,
-        };
-        let listening_thread = thread::spawn(move || {
+            templates,
+        }
+    }
+    pub fn start<'scope>(&'a self, scope: &'scope thread::Scope<'scope, 'a>) -> Stopper<'scope> {
+        let server = sync::Arc::new(tiny_http::Server::http("0.0.0.0:8000").unwrap());
+        let server_cloned = server.clone();
+        let listening_thread = scope.spawn(move || {
             eprintln!("[http_service] listening for requests");
             for request in server_cloned.incoming_requests() {
                 match request.method() {
@@ -34,8 +40,8 @@ impl Service {
                     }
                 }
                 let (data, content_type) = match request.url() {
-                    "/" | "/index.html" => (handlers.index_html(), "text/html; charset=UTF-8"),
-                    "/data.json" => (handlers.status_json(), "application/json; charset=UTF-8"),
+                    "/" | "/index.html" => (self.index_html(), "text/html; charset=UTF-8"),
+                    "/status.json" => (self.status_json(), "application/json; charset=UTF-8"),
                     _ => {
                         let response = tiny_http::Response::empty(tiny_http::StatusCode(404));
                         request.respond(response).unwrap();
@@ -47,13 +53,34 @@ impl Service {
                 request.respond(response).unwrap();
             }
         });
-        Self {
+        Stopper {
             server,
             listening_thread,
         }
     }
+    fn index_html(&self) -> String {
+        let data = Data {
+            projects: self.project_manager.projects(),
+            rate_limit_info: self.github_client.rate_limit_info(),
+        };
+        self.templates.render("status.html", &data).unwrap()
+    }
+    fn status_json(&self) -> String {
+        let data = Data {
+            projects: self.project_manager.projects(),
+            rate_limit_info: self.github_client.rate_limit_info(),
+        };
+        serde_json::to_string_pretty(&data).unwrap()
+    }
+}
 
-    pub fn shutdown(self) {
+pub struct Stopper<'scope> {
+    server: sync::Arc<tiny_http::Server>,
+    listening_thread: thread::ScopedJoinHandle<'scope, ()>,
+}
+
+impl<'scope> Stopper<'scope> {
+    pub fn stop(self) {
         eprintln!("[http_service] shutdown signal received");
         self.server.unblock();
         eprintln!("[http_service] unblocked listening thread; waiting to stop");
@@ -62,35 +89,12 @@ impl Service {
     }
 }
 
-struct Handlers {
-    github_client: Arc<github::Client>,
-    project_manager: Arc<project::Manager>,
-}
-
 static STATUS_DOT_HTML: &str = include_str!("status.html");
 
 #[derive(Debug, serde::Serialize)]
 struct Data {
     projects: Vec<project::Project>,
     rate_limit_info: github::RateLimiter,
-}
-
-impl Handlers {
-    fn index_html(&self) -> String {
-        let data = Data {
-            projects: self.project_manager.projects(),
-            rate_limit_info: self.github_client.rate_limit_info(),
-        };
-        let mut tt = handlebars::Handlebars::new();
-        tt.register_template_string("status.html", STATUS_DOT_HTML)
-            .unwrap();
-        tt.register_helper("time_diff", Box::new(helper::time_diff));
-        let rendered = tt.render("status.html", &data).unwrap();
-        rendered
-    }
-    fn status_json(&self) -> String {
-        "".into()
-    }
 }
 
 mod helper {

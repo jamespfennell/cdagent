@@ -1,6 +1,6 @@
 //! A GitHub client.
 
-use std::sync::{self, Arc};
+use std::sync;
 use std::time;
 use std::{collections::HashMap, time::Duration};
 
@@ -10,24 +10,24 @@ use crate::database;
 ///
 /// This is a "good citizen" client that honors rate limiting information,
 ///     and tries to cache requests using the HTTP etag header.
-pub struct Client {
+pub struct Client<'a> {
     agent: ureq::Agent,
     cache: sync::Mutex<HashMap<String, (String, WorkflowRun)>>,
     rate_limiter: sync::Mutex<RateLimiter>,
-    db: Arc<dyn database::DB>,
+    db: &'a dyn database::DB,
 }
 
-impl Client {
-    pub fn new(db: Arc<dyn database::DB>) -> Self {
+impl<'a> Client<'a> {
+    pub fn new(db: &'a dyn database::DB) -> Self {
         let agent = ureq::AgentBuilder::new()
             .timeout(Duration::from_millis(1000))
             .build();
         let cache = sync::Mutex::new(
-            database::get_typed(db.as_ref(), "github_client/cache")
+            database::get_typed(db, "github_client/cache")
                 .unwrap()
                 .unwrap_or_default(),
         );
-        let rate_limiter = sync::Mutex::new(RateLimiter::new(db.as_ref()));
+        let rate_limiter = sync::Mutex::new(RateLimiter::new(db));
         Self {
             agent,
             cache,
@@ -75,7 +75,7 @@ impl Client {
         self.rate_limiter
             .lock()
             .unwrap()
-            .update(self.db.as_ref(), auth_token, &response);
+            .update(self.db, auth_token, &response);
 
         if response.status() == 304 {
             if let Some((_, workflow_run)) = self.cache.lock().unwrap().get(&url) {
@@ -112,12 +112,7 @@ impl Client {
             cache.insert(url, (etag, workflow_run.clone()));
         }
         use std::ops::Deref;
-        database::set_typed(
-            self.db.as_ref(),
-            "github_client/cache".to_string(),
-            cache.deref(),
-        )
-        .unwrap();
+        database::set_typed(self.db, "github_client/cache".to_string(), cache.deref()).unwrap();
         Ok(workflow_run)
     }
 
@@ -177,7 +172,7 @@ impl RateLimiter {
         Err(format!("reached GitHub API rate limit for this auth token; resource={resource}, limit={}, seconds_to_reset={seconds_to_reset}", info.limit))
     }
     fn update(&mut self, db: &dyn database::DB, auth_token: &str, response: &ureq::Response) {
-        let Some(rate_limit_info) = RateLimitInfo::build(&response) else {
+        let Some(rate_limit_info) = RateLimitInfo::build(response) else {
             return;
         };
         self.auth_token_to_resource

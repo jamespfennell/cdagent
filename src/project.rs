@@ -4,96 +4,88 @@ use crate::github;
 use std::process::Command;
 use std::sync;
 use std::sync::mpsc;
-use std::sync::Arc;
 use std::thread;
 
-pub struct Manager {
-    tx: mpsc::Sender<()>,
-    main_thread: thread::JoinHandle<()>,
-    projects: Arc<sync::Mutex<Vec<Project>>>,
+pub struct Manager<'a> {
+    projects: sync::Mutex<Vec<Project>>,
+    db: &'a dyn database::DB,
+    github_client: &'a github::Client<'a>,
+    poll_interval: chrono::Duration,
 }
 
-impl Manager {
+impl<'a> Manager<'a> {
     pub fn create_and_start(
-        db: Arc<dyn database::DB>,
-        github_client: Arc<github::Client>,
+        db: &'a dyn database::DB,
+        github_client: &'a github::Client,
         projects: Vec<config::ProjectConfig>,
         poll_interval: chrono::Duration,
     ) -> Self {
-        let (tx, rx) = mpsc::channel();
         let projects: Vec<Project> = projects
             .into_iter()
             .map(|project| {
-                database::get_typed(
-                    db.as_ref(),
-                    &format!["project_manager/projects/{}", project.name],
-                )
-                .unwrap()
-                .unwrap_or_else(|| Project::new(project))
+                database::get_typed(db, &format!["project_manager/projects/{}", project.name])
+                    .unwrap()
+                    .unwrap_or_else(|| Project::new(project))
             })
             .collect();
-        let projects = Arc::new(sync::Mutex::new(projects));
-        let worker = Worker {
+        let projects = sync::Mutex::new(projects);
+        Self {
             db,
             github_client,
-            projects: projects.clone(),
-            poll_interval,
-            rx,
-        };
-        let main_thread = thread::spawn(move || {
-            worker.run();
-        });
-        Self {
-            tx,
-            main_thread,
             projects,
+            poll_interval,
         }
     }
+    pub fn start<'scope>(&'a self, scope: &'scope thread::Scope<'scope, 'a>) -> Stopper<'scope> {
+        let (tx, rx) = mpsc::channel();
+        let main_thread = scope.spawn(move || {
+            self.run(rx);
+        });
+        Stopper { tx, main_thread }
+    }
+    pub fn projects(&self) -> Vec<Project> {
+        (*self.projects.lock().unwrap()).clone()
+    }
+}
 
-    pub fn shutdown(self) {
+pub struct Stopper<'scope> {
+    tx: mpsc::Sender<()>,
+    main_thread: thread::ScopedJoinHandle<'scope, ()>,
+}
+
+impl<'scope> Stopper<'scope> {
+    pub fn stop(self) {
         eprintln!("[project_manager] shutdown signal received");
         self.tx.send(()).unwrap();
         eprintln!("[project_manager] signalled to work thread; waiting to stop");
         self.main_thread.join().unwrap();
         eprintln!("[project_manager] shutdown complete");
     }
-
-    pub fn projects(&self) -> Vec<Project> {
-        (*self.projects.lock().unwrap()).clone()
-    }
 }
 
-pub struct Worker {
-    db: Arc<dyn database::DB>,
-    github_client: Arc<github::Client>,
-    projects: Arc<sync::Mutex<Vec<Project>>>,
-    poll_interval: chrono::Duration,
-    rx: mpsc::Receiver<()>,
-}
-
-impl Worker {
-    fn run(self) {
+impl<'a> Manager<'a> {
+    fn run(&self, rx: mpsc::Receiver<()>) {
         eprintln!("[project_manager] work thread started");
         loop {
             let start = chrono::Utc::now();
 
             let mut projects = (*self.projects.lock().unwrap()).clone();
             for project in &mut projects {
-                if self.rx.try_recv().is_ok() {
+                if rx.try_recv().is_ok() {
                     eprintln!(
                         "[project_manager] running project {} interrupted because of shut down signal",
                         project.config.name,
                     );
                     return;
                 }
-                if let Err(err) = project.run(self.github_client.as_ref()) {
+                if let Err(err) = project.run(self.github_client) {
                     eprintln!(
                         "Failed to run one iteration for project {}: {err}",
                         project.config.name
                     );
                 }
                 database::set_typed(
-                    self.db.as_ref(),
+                    self.db,
                     format!("project_manager/projects/{}", project.config.name),
                     project,
                 )
@@ -103,7 +95,7 @@ impl Worker {
             let loop_duration = chrono::Utc::now() - start;
             match self.poll_interval.checked_sub(&loop_duration) {
                 Some(remaining) => {
-                    if self.rx.recv_timeout(remaining.to_std().unwrap()).is_ok() {
+                    if rx.recv_timeout(remaining.to_std().unwrap()).is_ok() {
                         eprintln!(
                             "[project_manager] sleep interrupted because of shut down signal"
                         );
@@ -120,7 +112,7 @@ impl Worker {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Project {
-    pub config: crate::config::ProjectConfig,
+    config: crate::config::ProjectConfig,
     last_workflow_run: Option<crate::github::WorkflowRun>,
     pending_workflow_run: Option<crate::github::WorkflowRun>,
     run_results: Vec<RunResult>,
@@ -225,9 +217,9 @@ impl Project {
             }
         }
         result.finished = chrono::offset::Utc::now();
-        self.run_results.push(result);
+        self.run_results.insert(0, result);
         while self.run_results.len() >= self.config.retention {
-            self.run_results.remove(0);
+            self.run_results.pop();
         }
         Ok(())
     }
