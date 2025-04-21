@@ -83,12 +83,8 @@ impl Cli {
             },
         };
         let github_client = github::Client::new(db.as_ref());
-        let project_manager = project::Manager::create_and_start(
-            db.as_ref(),
-            &github_client,
-            config.projects,
-            poll_interval,
-        );
+        let project_manager =
+            project::Manager::new(db.as_ref(), &github_client, config.projects, poll_interval);
         let http_service = http::Service::new(&github_client, &project_manager);
 
         std::thread::scope(|s| {

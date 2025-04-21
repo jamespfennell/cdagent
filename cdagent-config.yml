@@ -1,0 +1,18 @@
+
+
+projects:
+- name: Transiter
+  repo: "github.com/jamespfennell/transiter"
+  branch: "master"
+  working_directory: /home/james/801X-transiter-go
+  steps:
+  - name: Pull
+    run: docker-compose pull
+  - name: Redeploy Transiter
+    run: docker-compose up -d transiter
+  - name: Redeploy Transiter docs
+    run: docker-compose up -d transiter-docs
+  - name: Wait for 5 seconds
+    run: sleep 5
+  - name: Ping demo.transiter.dev
+    run: curl --fail-with-body -v https://demo.transiter.dev/systems/us-ny-subway --output /dev/null

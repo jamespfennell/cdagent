@@ -6,6 +6,50 @@ use std::{collections::HashMap, time::Duration};
 
 use crate::database;
 
+/// A GitHub Repo.
+#[derive(Clone, Debug)]
+pub struct Repo {
+    /// GitHub user that owns the repo e.g. jamespfennell.
+    pub user: String,
+    /// Repository name e.g. rollouts.
+    pub name: String,
+}
+
+impl serde::Serialize for Repo {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let raw = format!("github.com/{}/{}", self.user, self.name,);
+        str::serialize(&raw, serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Repo {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+        use serde::de::Unexpected;
+        let raw: &str = serde::Deserialize::deserialize(deserializer)?;
+        let err = D::Error::invalid_value(
+            Unexpected::Str(raw),
+            &"a string of the form github.com/<user>/<name>",
+        );
+        let Some(raw_1) = raw.strip_prefix("github.com/") else {
+            return Err(err);
+        };
+        let Some(i) = raw_1.find('/') else {
+            return Err(err);
+        };
+        Ok(Self {
+            user: raw_1[..i].to_string(),
+            name: raw_1[i + 1..].to_string(),
+        })
+    }
+}
+
 /// A GitHub client.
 ///
 /// This is a "good citizen" client that honors rate limiting information,
@@ -44,14 +88,15 @@ impl<'a> Client<'a> {
     /// See the commands on the auth token config for more information about this.
     pub fn get_latest_successful_workflow_run(
         &self,
-        user: &str,
-        repo: &str,
+        repo: &Repo,
         branch: &str,
         auth_token: &str,
     ) -> Result<WorkflowRun, String> {
         self.rate_limiter.lock().unwrap().check(auth_token)?;
 
-        let url = format!["https://api.github.com/repos/{user}/{repo}/actions/runs?branch={branch}&event=push&status=success&per_page=1&exclude_pull_requests=true"];
+        let url = format![
+            "https://api.github.com/repos/{}/{}/actions/runs?branch={}&event=push&status=success&per_page=1&exclude_pull_requests=true",
+            repo.user, repo.name, branch];
         let mut request = self
             .agent
             .get(&url)

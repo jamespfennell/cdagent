@@ -1,5 +1,7 @@
 //! Configuration for the agent.
 
+use crate::github;
+
 /// Configuration for the agent.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Config {
@@ -21,15 +23,13 @@ pub struct ProjectConfig {
     #[serde(default)]
     pub paused: bool,
 
-    /// Name of GitHub user that owns the GitHub repository.
-    pub github_user: String,
+    /// GitHub repository to watch.
+    ///
+    /// This field as the form `github.com/$USER/$NAME`.
+    pub repo: github::Repo,
 
-    /// Name of the GitHub repository.
-    pub repo: String,
-
-    /// Mainline branch which will be watched for new successful CI runs.
-    /// Will generally be 'main' or 'master' but there are no restrictions.
-    pub mainline_branch: String,
+    /// Branch of repo to watch.
+    pub branch: String,
 
     /// Auth token to use for making GitHub API requests.
     ///

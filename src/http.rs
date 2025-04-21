@@ -25,10 +25,10 @@ impl<'a> Service<'a> {
             templates,
         }
     }
-    pub fn start<'scope>(&'a self, scope: &'scope thread::Scope<'scope, 'a>) -> Stopper<'scope> {
+    pub fn start<'scope>(&'a self, scope: &'scope thread::Scope<'scope, 'a>) -> Stopper {
         let server = sync::Arc::new(tiny_http::Server::http("0.0.0.0:8000").unwrap());
         let server_cloned = server.clone();
-        let listening_thread = scope.spawn(move || {
+        scope.spawn(move || {
             eprintln!("[http_service] listening for requests");
             for request in server_cloned.incoming_requests() {
                 match request.method() {
@@ -53,39 +53,33 @@ impl<'a> Service<'a> {
                 request.respond(response).unwrap();
             }
         });
-        Stopper {
-            server,
-            listening_thread,
-        }
+        Stopper { server }
     }
     fn index_html(&self) -> String {
-        let data = Data {
-            projects: self.project_manager.projects(),
-            rate_limit_info: self.github_client.rate_limit_info(),
-        };
+        let data = self.data();
         self.templates.render("status.html", &data).unwrap()
     }
     fn status_json(&self) -> String {
-        let data = Data {
+        let data = self.data();
+        serde_json::to_string_pretty(&data).unwrap()
+    }
+    fn data(&self) -> Data {
+        Data {
             projects: self.project_manager.projects(),
             rate_limit_info: self.github_client.rate_limit_info(),
-        };
-        serde_json::to_string_pretty(&data).unwrap()
+        }
     }
 }
 
-pub struct Stopper<'scope> {
+pub struct Stopper {
     server: sync::Arc<tiny_http::Server>,
-    listening_thread: thread::ScopedJoinHandle<'scope, ()>,
 }
 
-impl<'scope> Stopper<'scope> {
+impl Stopper {
     pub fn stop(self) {
         eprintln!("[http_service] shutdown signal received");
         self.server.unblock();
         eprintln!("[http_service] unblocked listening thread; waiting to stop");
-        self.listening_thread.join().unwrap();
-        eprintln!("[http_service] shutdown complete");
     }
 }
 

@@ -14,7 +14,7 @@ pub struct Manager<'a> {
 }
 
 impl<'a> Manager<'a> {
-    pub fn create_and_start(
+    pub fn new(
         db: &'a dyn database::DB,
         github_client: &'a github::Client,
         projects: Vec<config::ProjectConfig>,
@@ -36,30 +36,27 @@ impl<'a> Manager<'a> {
             poll_interval,
         }
     }
-    pub fn start<'scope>(&'a self, scope: &'scope thread::Scope<'scope, 'a>) -> Stopper<'scope> {
+    pub fn start<'scope>(&'a self, scope: &'scope thread::Scope<'scope, 'a>) -> Stopper {
         let (tx, rx) = mpsc::channel();
-        let main_thread = scope.spawn(move || {
+        scope.spawn(move || {
             self.run(rx);
         });
-        Stopper { tx, main_thread }
+        Stopper { tx }
     }
     pub fn projects(&self) -> Vec<Project> {
         (*self.projects.lock().unwrap()).clone()
     }
 }
 
-pub struct Stopper<'scope> {
+pub struct Stopper {
     tx: mpsc::Sender<()>,
-    main_thread: thread::ScopedJoinHandle<'scope, ()>,
 }
 
-impl<'scope> Stopper<'scope> {
+impl Stopper {
     pub fn stop(self) {
         eprintln!("[project_manager] shutdown signal received");
         self.tx.send(()).unwrap();
         eprintln!("[project_manager] signalled to work thread; waiting to stop");
-        self.main_thread.join().unwrap();
-        eprintln!("[project_manager] shutdown complete");
     }
 }
 
@@ -136,9 +133,8 @@ impl Project {
         }
         let old_workflow_run = &self.last_workflow_run;
         let new_workflow_run = github_client.get_latest_successful_workflow_run(
-            &self.config.github_user,
             &self.config.repo,
-            &self.config.mainline_branch,
+            &self.config.branch,
             &self.config.auth_token,
         )?;
         if let Some(old_workflow_run) = old_workflow_run {
