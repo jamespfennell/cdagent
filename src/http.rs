@@ -19,6 +19,7 @@ impl<'a> Service<'a> {
             .register_template_string("status.html", STATUS_DOT_HTML)
             .unwrap();
         templates.register_helper("time_diff", Box::new(helper::time_diff));
+        templates.register_helper("json_pretty", Box::new(helper::json_pretty));
         Self {
             github_client,
             project_manager,
@@ -93,6 +94,20 @@ struct Data {
 
 mod helper {
     use handlebars::*;
+    pub fn json_pretty(
+        h: &Helper,
+        _: &Handlebars,
+        _: &Context,
+        _: &mut RenderContext,
+        out: &mut dyn Output,
+    ) -> HelperResult {
+        let param = h.param(0).unwrap();
+        let value = param.value();
+        let pretty = serde_json::to_string_pretty(value).unwrap();
+        write!(out, "{}", pretty)?;
+        Ok(())
+    }
+
     pub fn time_diff(
         h: &Helper,
         _: &Handlebars,
@@ -111,15 +126,17 @@ mod helper {
         let now = chrono::Utc::now();
         if t < now {
             let d = now - t;
-            if d.num_minutes() < 60 {
-                write!(out, "{} minutes ago", d.num_minutes())?;
+            let (i, s) = if d.num_minutes() < 60 {
+                (d.num_minutes(), "minute")
             } else if d.num_hours() < 24 {
-                write!(out, "{} hours ago", d.num_hours())?;
+                (d.num_hours(), "hour")
             } else if d.num_days() < 15 {
-                write!(out, "{} days ago", d.num_days())?;
+                (d.num_days(), "day")
             } else {
-                write!(out, "{} weeks ago", d.num_weeks())?;
-            }
+                (d.num_weeks(), "week")
+            };
+            let p = if i == 1 { "" } else { "s" };
+            write!(out, "{i} {s}{p} ago")?;
         } else {
             let d = t - now;
             write!(out, "in {} minutes", d.num_minutes())?;

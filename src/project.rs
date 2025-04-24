@@ -109,14 +109,14 @@ impl<'a> Manager<'a> {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Project {
-    config: crate::config::ProjectConfig,
-    last_workflow_run: Option<crate::github::WorkflowRun>,
-    pending_workflow_run: Option<crate::github::WorkflowRun>,
+    config: config::ProjectConfig,
+    last_workflow_run: Option<github::WorkflowRun>,
+    pending_workflow_run: Option<github::WorkflowRun>,
     run_results: Vec<RunResult>,
 }
 
 impl Project {
-    pub fn new(config: crate::config::ProjectConfig) -> Self {
+    pub fn new(config: config::ProjectConfig) -> Self {
         Self {
             config,
             last_workflow_run: None,
@@ -169,8 +169,9 @@ impl Project {
         self.last_workflow_run = Some(new_workflow_run.clone());
         self.pending_workflow_run = None;
 
+        let json_config = serde_json::to_value(&self.config).unwrap();
         let mut result = RunResult {
-            config: self.config.clone(),
+            config: json_config,
             started,
             finished: started,
             success: true,
@@ -193,16 +194,15 @@ impl Project {
                 command.current_dir(working_directory);
             }
             let step_result = match command.output() {
-                Ok(output) => {
-                    StepResult::new(step, &output)
-                },
+                Ok(output) => StepResult::new(step, &output),
                 Err(err) => {
+                    let json_config = serde_json::to_value(step).unwrap();
                     StepResult{
-                        config:step.clone(),
+                        config: json_config,
                         success:false,
                         stderr: format!("Failed to start command.\nThis is probably an error in the project configuration.\nError: {err}"),
                     }
-                },
+                }
             };
             let success = step_result.success;
             result.steps.push(step_result);
@@ -223,7 +223,10 @@ impl Project {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct RunResult {
-    config: config::ProjectConfig,
+    // The project config at the time of the workflow run.
+    // We store this as a JSON value so that the config file format
+    // can be changed without worrying about serializing this field.
+    config: serde_json::Value,
     #[serde(default)]
     started: chrono::DateTime<chrono::Utc>,
     #[serde(default)]
@@ -235,15 +238,19 @@ struct RunResult {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct StepResult {
-    config: config::Step,
+    // The step config at the time of the step execution.
+    // We store this as a JSON value so that the config file format
+    // can be changed without worrying about serializing this field.
+    config: serde_json::Value,
     success: bool,
     stderr: String,
 }
 
 impl StepResult {
     fn new(step: &config::Step, output: &std::process::Output) -> Self {
+        let json_config = serde_json::to_value(step).unwrap();
         Self {
-            config: step.clone(),
+            config: json_config,
             success: output.status.success(),
             stderr: vec_to_string(&output.stderr),
         }
