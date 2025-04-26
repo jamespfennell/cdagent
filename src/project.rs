@@ -20,7 +20,7 @@ impl<'a> Manager<'a> {
         projects: Vec<config::ProjectConfig>,
         poll_interval: chrono::Duration,
     ) -> Self {
-        let projects: Vec<Project> = projects
+        let mut projects: Vec<Project> = projects
             .into_iter()
             .map(|project| {
                 database::get_typed(db, &format!["project_manager/projects/{}", project.name])
@@ -28,6 +28,7 @@ impl<'a> Manager<'a> {
                     .unwrap_or_else(|| Project::new(project))
             })
             .collect();
+        projects.sort_by_key(|p| p.config.name.clone());
         let projects = sync::Mutex::new(projects);
         Self {
             db,
@@ -111,8 +112,14 @@ impl<'a> Manager<'a> {
 pub struct Project {
     config: config::ProjectConfig,
     last_workflow_run: Option<github::WorkflowRun>,
-    pending_workflow_run: Option<github::WorkflowRun>,
+    pending: Option<Pending>,
     run_results: Vec<RunResult>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+struct Pending {
+    workflow_run: github::WorkflowRun,
+    run_time: chrono::DateTime<chrono::Utc>,
 }
 
 impl Project {
@@ -120,15 +127,15 @@ impl Project {
         Self {
             config,
             last_workflow_run: None,
-            pending_workflow_run: None,
+            pending: None,
             run_results: Default::default(),
         }
     }
 
     pub fn run(&mut self, github_client: &github::Client) -> Result<(), String> {
-        let started = chrono::offset::Utc::now();
+        let now = chrono::offset::Utc::now();
         if self.config.paused {
-            self.pending_workflow_run = None;
+            self.pending = None;
             return Ok(());
         }
         let old_workflow_run = &self.last_workflow_run;
@@ -137,29 +144,43 @@ impl Project {
             &self.config.branch,
             &self.config.auth_token,
         )?;
+        // If there is no new workflow run, exit early.
         if let Some(old_workflow_run) = old_workflow_run {
             if old_workflow_run.id == new_workflow_run.id {
-                self.pending_workflow_run = None;
+                self.pending = None;
                 return Ok(());
             }
         }
-        let elapsed_mins = (started - new_workflow_run.updated_at).num_minutes();
-        if elapsed_mins < self.config.wait_minutes {
-            if let Some(pending_workflow_run) = &self.pending_workflow_run {
-                if pending_workflow_run.id == new_workflow_run.id {
-                    return Ok(());
+
+        let run_time =
+            new_workflow_run.updated_at + chrono::Duration::minutes(self.config.wait_minutes);
+        // If it's not time to run the workflow yet, log and continue.
+        if run_time > now {
+            let updated = match &self.pending {
+                None => true,
+                Some(pending) => {
+                    if pending.workflow_run.id != new_workflow_run.id {
+                        eprintln!(
+                            "[{}] Abandoning workflow run {:#?} in favor of new workflow run.",
+                            pending.workflow_run.id, self.config.name,
+                        );
+                        true
+                    } else {
+                        false
+                    }
                 }
+            };
+            if updated {
                 eprintln!(
-                    "[{}] Abandoning workflow run {pending_workflow_run:#?} in favor of new workflow run.",
-                    self.config.name,
-                );
-            }
-            eprintln!(
-                "[{}] New successful workflow run found: {new_workflow_run:#?}; waiting {} minutes to redeploy.",
+                "[{}] New successful workflow run found: {new_workflow_run:#?}; waiting until {} to deploy.",
                 self.config.name,
-                self.config.wait_minutes - elapsed_mins,
+                run_time,
             );
-            self.pending_workflow_run = Some(new_workflow_run);
+            }
+            self.pending = Some(Pending {
+                workflow_run: new_workflow_run,
+                run_time,
+            });
             return Ok(());
         }
         eprintln!(
@@ -167,13 +188,13 @@ impl Project {
             self.config.name
         );
         self.last_workflow_run = Some(new_workflow_run.clone());
-        self.pending_workflow_run = None;
+        self.pending = None;
 
         let json_config = serde_json::to_value(&self.config).unwrap();
         let mut result = RunResult {
             config: json_config,
-            started,
-            finished: started,
+            started: now,
+            finished: now,
             success: true,
             workflow_run: new_workflow_run,
             steps: vec![],

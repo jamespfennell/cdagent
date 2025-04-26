@@ -1,8 +1,10 @@
 //! A GitHub client.
 
 use std::sync;
-use std::time;
 use std::{collections::HashMap, time::Duration};
+
+use chrono::TimeZone;
+use chrono::Utc;
 
 use crate::database;
 
@@ -68,7 +70,7 @@ impl<'a> Client<'a> {
             .build();
         let cache = sync::Mutex::new(
             database::get_typed(db, "github_client/cache")
-                .unwrap()
+                .unwrap_or_default()
                 .unwrap_or_default(),
         );
         let rate_limiter = sync::Mutex::new(RateLimiter::new(db));
@@ -191,7 +193,7 @@ pub struct RateLimiter {
 impl RateLimiter {
     fn new(db: &dyn database::DB) -> Self {
         database::get_typed(db, "github_client/rate_limiter")
-            .unwrap()
+            .unwrap_or_default()
             .unwrap_or_default()
     }
     fn check(&self, auth_token: &str) -> Result<(), String> {
@@ -206,15 +208,12 @@ impl RateLimiter {
         if info.remaining > 0 {
             return Ok(());
         }
-        let current_timestamp = time::SystemTime::now()
-            .duration_since(time::UNIX_EPOCH)
-            .expect("current time should be after the Unix epoch")
-            .as_secs();
-        let seconds_to_reset = match info.reset.checked_sub(current_timestamp) {
-            None => return Ok(()),
-            Some(s) => s,
-        };
-        Err(format!("reached GitHub API rate limit for this auth token; resource={resource}, limit={}, seconds_to_reset={seconds_to_reset}", info.limit))
+        // We were out of quota the call, but now we are after the quota reset time
+        // so we can make the call.
+        if info.reset <= chrono::Utc::now() {
+            return Ok(());
+        }
+        Err(format!("reached GitHub API rate limit for this auth token; resource={resource}, limit={}, reset_time={}", info.limit, info.reset))
     }
     fn update(&mut self, db: &dyn database::DB, auth_token: &str, response: &ureq::Response) {
         let Some(rate_limit_info) = RateLimitInfo::build(response) else {
@@ -233,7 +232,7 @@ pub struct RateLimitInfo {
     pub limit: u64,
     pub remaining: u64,
     pub used: u64,
-    pub reset: u64,
+    pub reset: chrono::DateTime<Utc>,
     pub resource: String,
 }
 
@@ -247,14 +246,15 @@ impl RateLimitInfo {
             limit: 0,
             remaining: 0,
             used: 0,
-            reset: 0,
+            reset: chrono::Utc::now(),
             resource,
         };
+        let mut reset_unix = 0_u64;
         for (u, header_name) in [
             (&mut info.limit, "x-ratelimit-limit"),
             (&mut info.remaining, "x-ratelimit-remaining"),
             (&mut info.used, "x-ratelimit-used"),
-            (&mut info.reset, "x-ratelimit-reset"),
+            (&mut reset_unix, "x-ratelimit-reset"),
         ] {
             *u = match response.header(header_name) {
                 None => return None,
@@ -264,6 +264,12 @@ impl RateLimitInfo {
                 },
             };
         }
+        info.reset = match chrono::Utc.timestamp_opt(reset_unix as i64, 0) {
+            chrono::LocalResult::Single(t) => t,
+            _ => {
+                return None;
+            }
+        };
         Some(info)
     }
 }

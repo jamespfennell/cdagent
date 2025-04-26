@@ -18,7 +18,8 @@ impl<'a> Service<'a> {
         templates
             .register_template_string("status.html", STATUS_DOT_HTML)
             .unwrap();
-        templates.register_helper("time_diff", Box::new(helper::time_diff));
+        templates.register_helper("duration_since", Box::new(helper::duration_since));
+        templates.register_helper("duration_to", Box::new(helper::duration_to));
         templates.register_helper("json_pretty", Box::new(helper::json_pretty));
         Self {
             github_client,
@@ -108,7 +109,7 @@ mod helper {
         Ok(())
     }
 
-    pub fn time_diff(
+    pub fn duration_since(
         h: &Helper,
         _: &Handlebars,
         _: &Context,
@@ -123,24 +124,54 @@ mod helper {
         }
         let i = format!("\"{i}\"");
         let t: chrono::DateTime<chrono::Utc> = serde_json::from_str(&i).unwrap();
-        let now = chrono::Utc::now();
-        if t < now {
-            let d = now - t;
-            let (i, s) = if d.num_minutes() < 60 {
-                (d.num_minutes(), "minute")
-            } else if d.num_hours() < 24 {
-                (d.num_hours(), "hour")
-            } else if d.num_days() < 15 {
-                (d.num_days(), "day")
-            } else {
-                (d.num_weeks(), "week")
-            };
-            let p = if i == 1 { "" } else { "s" };
-            write!(out, "{i} {s}{p} ago")?;
+        let d = chrono::Utc::now() - t;
+        let (i, s) = if d.num_minutes() <= 1 {
+            write!(out, "just now")?;
+            return Ok(());
+        } else if d.num_minutes() < 60 {
+            (d.num_minutes(), "minute")
+        } else if d.num_hours() < 24 {
+            (d.num_hours(), "hour")
+        } else if d.num_days() < 15 {
+            (d.num_days(), "day")
         } else {
-            let d = t - now;
-            write!(out, "in {} minutes", d.num_minutes())?;
+            (d.num_weeks(), "week")
+        };
+        let p = if i == 1 { "" } else { "s" };
+        write!(out, "{i} {s}{p} ago")?;
+        Ok(())
+    }
+
+    pub fn duration_to(
+        h: &Helper,
+        _: &Handlebars,
+        _: &Context,
+        _: &mut RenderContext,
+        out: &mut dyn Output,
+    ) -> HelperResult {
+        let param = h.param(0).unwrap();
+        let i = param.value().render();
+        if i.is_empty() {
+            out.write("at an unknown time")?;
+            return Ok(());
         }
+        let i = format!("\"{i}\"");
+        let t: chrono::DateTime<chrono::Utc> = serde_json::from_str(&i).unwrap();
+        let d = t - chrono::Utc::now();
+        let (i, s) = if d.num_minutes() <= 1 {
+            write!(out, "imminently")?;
+            return Ok(());
+        } else if d.num_minutes() < 60 {
+            (d.num_minutes(), "minute")
+        } else if d.num_hours() < 24 {
+            (d.num_hours(), "hour")
+        } else if d.num_days() < 15 {
+            (d.num_days(), "day")
+        } else {
+            (d.num_weeks(), "week")
+        };
+        let p = if i == 1 { "" } else { "s" };
+        write!(out, "in {i} {s}{p}")?;
         Ok(())
     }
 }

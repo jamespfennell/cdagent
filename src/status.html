@@ -11,10 +11,6 @@
     margin: 0px auto;
     font-family: sans-serif;
 }
-
-h1, h2, h3, h4 {
-    font-weight: 700;
-}
 a {
   color: royalblue;
   text-underline-position: under;
@@ -45,7 +41,8 @@ a {
 }
 
 .project {
-  padding-left: 10px;
+  margin: 30px 0px; 
+  padding: 0px 0px 0px 10px;
 }
 .project > p {
   padding: 0px 0px 0px 10px;
@@ -79,10 +76,10 @@ a {
   height: 20px;
   border-radius: 10px;
   font-size: 2.5em;
-  margin: 0px 10px 0px 0px;
+  margin: 0px 6px 0px 0px;
 }
 .deployment > .header > .title {
-  margin: 5px 0px;
+  margin: 8px 0px 4px 0px;
   font-weight: bold;
 }
 .deployment > .body {
@@ -155,14 +152,14 @@ Table of contents, if we ever want it back.
     {{#if run_results.[0]}}
       {{#with run_results.[0]}}
         Last {{ #if success }}deployed{{ else }}failed{{ /if }}
-        {{ time_diff finished }}.
+        {{ duration_since finished }}.
       {{/with}}
     {{ else }}
     Never deployed.
     {{/if}}
   </p>
 
-  {{#if pending_workflow_run }}
+  {{#if pending }}
   <details class="projectWidget" open>
     <summary>
       Pending deployment
@@ -172,13 +169,13 @@ Table of contents, if we ever want it back.
         <div class="header">
           <div class="circle orange"></div>
           <div class="title">
-            {{ pending_workflow_run.display_title }}
+            {{ pending.workflow_run.display_title }}
           </div>
         </div>
         <div class="body">
           <p>
-            <a href="{{ pending_workflow_run.html_url }}">Build #{{ pending_workflow_run.run_number }}.</a>
-            Deploying TODO.
+            <a href="{{ pending.workflow_run.html_url }}">Build #{{ pending.workflow_run.run_number }}.</a>
+            Deploying {{ duration_to pending.run_time }}.
           </p>
         </div>
       </div>
@@ -207,7 +204,7 @@ Table of contents, if we ever want it back.
           <p>
             <a href="{{ workflow_run.html_url }}">Build #{{ workflow_run.run_number }}.</a>
             {{ #if success }}Deployed{{ else }}Failed{{ /if }}
-            {{ time_diff finished }}.
+            {{ duration_since finished }}.
           </p>
           <details>
             <summary>Deployment logs</summary>
@@ -253,13 +250,13 @@ Table of contents, if we ever want it back.
   <tr>
     <th>resource</th>
     <th>used/limit</th>
-    <th>reset time</th>
+    <th>resetting</th>
   </tr>
   {{ #each rate_limit_info.resource_to_info as |info key| }}
   <tr>
     <td>{{ info.resource }}</td>
     <td>{{ info.used }}/{{ info.limit }}</td>
-    <td>{{ info.reset }}</td>
+    <td>{{ duration_to info.reset }}</td>
   </tr>
   {{ /each }}
 </table>
