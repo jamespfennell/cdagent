@@ -6,13 +6,18 @@ use std::thread;
 use crate::{github, project};
 
 pub struct Service<'a> {
+    hostname: String,
     github_client: &'a github::Client<'a>,
     project_manager: &'a project::Manager<'a>,
     templates: handlebars::Handlebars<'static>,
 }
 
 impl<'a> Service<'a> {
-    pub fn new(github_client: &'a github::Client, project_manager: &'a project::Manager) -> Self {
+    pub fn new(
+        hostname: String,
+        github_client: &'a github::Client,
+        project_manager: &'a project::Manager,
+    ) -> Self {
         let mut templates = handlebars::Handlebars::new();
         templates.set_strict_mode(true);
         templates
@@ -22,6 +27,7 @@ impl<'a> Service<'a> {
         templates.register_helper("duration_to", Box::new(helper::duration_to));
         templates.register_helper("json_pretty", Box::new(helper::json_pretty));
         Self {
+            hostname,
             github_client,
             project_manager,
             templates,
@@ -67,6 +73,7 @@ impl<'a> Service<'a> {
     }
     fn data(&self) -> Data {
         Data {
+            hostname: self.hostname.clone(),
             projects: self.project_manager.projects(),
             rate_limit_info: self.github_client.rate_limit_info(),
         }
@@ -89,6 +96,7 @@ static STATUS_DOT_HTML: &str = include_str!("status.html");
 
 #[derive(Debug, serde::Serialize)]
 struct Data {
+    hostname: String,
     projects: Vec<project::Project>,
     rate_limit_info: github::RateLimiter,
 }

@@ -11,10 +11,16 @@ But for simplicity the agent is designed to be "Docker agnostic"
     and can run any command when a new successful build on mainline completes.
 
 The repositories to watch and the VM commands to execute are specified using a config file.
-An example of this config file is `example-config.yaml` and the full spec with documentation
+An example of this config file is `config.yml` and the full spec with documentation
     is at `src/config.rs`.
 
 To run the agent in the repository root, simply run `cargo run -- $PATH_TO_CONFIG_FILE`.
+
+To persist the state of the agent across runs,
+    including the history of all previous rollouts,
+    pass the `--db=some/file.txt` flag.
+State will be saved in that flag.
+
 
 ## Deploying the agent
 

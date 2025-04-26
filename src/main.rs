@@ -1,5 +1,6 @@
 mod config;
 mod database;
+mod email;
 mod github;
 mod http;
 mod project;
@@ -73,6 +74,10 @@ impl Cli {
         });
         eprintln!("[main] using the following poll interval: {poll_interval:?}");
 
+        let notifier: Box<dyn email::Notifier> = match config.email_config {
+            None => Box::new(email::NoOpNotifier {}),
+            Some(config) => Box::new(email::Client::new(config)),
+        };
         let db: Box<dyn database::DB> = match &self.db {
             None => Box::new(database::new_in_memory_db()),
             Some(path) => match database::new_on_disk_db(path.clone()) {
@@ -83,9 +88,16 @@ impl Cli {
             },
         };
         let github_client = github::Client::new(db.as_ref());
-        let project_manager =
-            project::Manager::new(db.as_ref(), &github_client, config.projects, poll_interval);
-        let http_service = http::Service::new(&github_client, &project_manager);
+        let project_manager = project::Manager::new(
+            db.as_ref(),
+            notifier.as_ref(),
+            &github_client,
+            config.hostname.clone(),
+            config.projects,
+            poll_interval,
+        );
+        let http_service =
+            http::Service::new(config.hostname.clone(), &github_client, &project_manager);
 
         std::thread::scope(|s| {
             let stopper_1 = http_service.start(s);

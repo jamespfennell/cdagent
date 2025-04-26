@@ -1,0 +1,19 @@
+projects:
+- name: subwaydata.nyc (website)
+  repo: github.com/jamespfennell/subwaydata.nyc
+  branch: main
+  working_directory: /home/james/6001-subwaydata.nyc
+  steps:
+  - name: Pull
+    run: docker-compose pull
+  - name: Redeploy
+    run: docker-compose up -d
+  - name: Wait for 5 seconds
+    run: sleep 5
+  - name: Ping subwaydata.nyc
+    run: curl --fail-with-body -v https://subwaydata.nyc --output /dev/null
+
+email_config:
+  smtp_url: smtps://username:password@smtp.example.com
+  to: james@jpfennell.com
+  from: bot@jamespfennell.com

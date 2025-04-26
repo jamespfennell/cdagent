@@ -1,12 +1,19 @@
 //! Configuration for the agent.
 
-use crate::github;
+use crate::{email, github};
 
 /// Configuration for the agent.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Config {
+    /// Hostname for the agent is running on; e.g. rollouts.example.com.
+    ///
+    /// This is used when sending emails and on the status page.
+    pub hostname: String,
+
     /// List of projects to run the agent for.
     pub projects: Vec<ProjectConfig>,
+
+    pub email_config: Option<email::Config>,
 }
 
 /// A project to run the agent for.

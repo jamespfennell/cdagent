@@ -1,5 +1,6 @@
 use crate::config;
 use crate::database;
+use crate::email;
 use crate::github;
 use std::process::Command;
 use std::sync;
@@ -7,8 +8,10 @@ use std::sync::mpsc;
 use std::thread;
 
 pub struct Manager<'a> {
+    agent_url: String,
     projects: sync::Mutex<Vec<Project>>,
     db: &'a dyn database::DB,
+    notifier: &'a dyn email::Notifier,
     github_client: &'a github::Client<'a>,
     poll_interval: chrono::Duration,
 }
@@ -16,23 +19,36 @@ pub struct Manager<'a> {
 impl<'a> Manager<'a> {
     pub fn new(
         db: &'a dyn database::DB,
+        notifier: &'a dyn email::Notifier,
         github_client: &'a github::Client,
+        agent_url: String,
         projects: Vec<config::ProjectConfig>,
         poll_interval: chrono::Duration,
     ) -> Self {
         let mut projects: Vec<Project> = projects
             .into_iter()
-            .map(|project| {
-                database::get_typed(db, &format!["project_manager/projects/{}", project.name])
-                    .unwrap()
-                    .unwrap_or_else(|| Project::new(project))
+            .map(|project_config| {
+                match database::get_typed::<Project>(
+                    db,
+                    &format!["project_manager/projects/{}", project_config.name],
+                )
+                .unwrap()
+                {
+                    None => Project::new(project_config),
+                    Some(mut project) => {
+                        project.config = project_config;
+                        project
+                    }
+                }
             })
             .collect();
         projects.sort_by_key(|p| p.config.name.clone());
         let projects = sync::Mutex::new(projects);
         Self {
+            agent_url,
             db,
             github_client,
+            notifier,
             projects,
             poll_interval,
         }
@@ -76,7 +92,7 @@ impl<'a> Manager<'a> {
                     );
                     return;
                 }
-                if let Err(err) = project.run(self.github_client) {
+                if let Err(err) = project.run(self.github_client, self.notifier, &self.agent_url) {
                     eprintln!(
                         "Failed to run one iteration for project {}: {err}",
                         project.config.name
@@ -132,7 +148,12 @@ impl Project {
         }
     }
 
-    pub fn run(&mut self, github_client: &github::Client) -> Result<(), String> {
+    pub fn run(
+        &mut self,
+        github_client: &github::Client,
+        notifier: &dyn email::Notifier,
+        agent_url: &str,
+    ) -> Result<(), String> {
         let now = chrono::offset::Utc::now();
         if self.config.paused {
             self.pending = None;
@@ -233,6 +254,13 @@ impl Project {
                 break;
             }
         }
+        if !result.success {
+            notifier.notify(
+                &format!["Failed rollout for {}", self.config.name],
+                &format!["Debug this failure: https://{agent_url}",],
+            );
+        }
+
         result.finished = chrono::offset::Utc::now();
         self.run_results.insert(0, result);
         while self.run_results.len() >= self.config.retention {

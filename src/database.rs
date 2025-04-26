@@ -128,7 +128,7 @@ fn parse_db_file(s: &str) -> BTreeMap<String, String> {
             },
         };
         if let Some((key, val_start)) = flush_or {
-            let val = s[val_start..offset].to_string();
+            let val = s[val_start..offset].trim().to_string();
             m.insert(key, val);
         };
         match line_or {
@@ -161,7 +161,7 @@ impl DB for OnDiskDB {
                 *occupied_entry.get_mut() = value;
             }
         }
-        let mut buf = String::new();
+        let mut buf = "// This is a rollouts agent database file.\n// https://github.com/jamespfennell/rollouts\n//\n".to_string();
         for (k, v) in &*m {
             use std::fmt::Write;
             writeln!(&mut buf, "// key={k}\n{v}").unwrap();
@@ -202,7 +202,9 @@ mod tests {
     fn on_disk_db() {
         let dir = std::env::temp_dir();
         let path = dir.join("rollouts_on_disk_db.json");
-        std::fs::remove_file(path.clone()).unwrap();
+        if let Err(err) = std::fs::remove_file(path.clone()) {
+            eprintln!("failed to delete file: {err}");
+        }
 
         let db = new_on_disk_db(path.clone()).unwrap();
         let key_1 = "string".to_string();
