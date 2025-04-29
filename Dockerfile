@@ -11,6 +11,7 @@ RUN cargo build --release
 
 
 FROM debian:latest
-RUN apt install curl --yes
+RUN apt-get update
+RUN apt-get install curl --yes
 COPY --from=builder build/target/release/rollouts /usr/bin/
 ENTRYPOINT ["rollouts"]
