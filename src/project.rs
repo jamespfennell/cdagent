@@ -135,6 +135,7 @@ pub struct Project {
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 struct Pending {
     workflow_run: github::WorkflowRun,
+    first_seen: chrono::DateTime<chrono::Utc>,
     run_time: chrono::DateTime<chrono::Utc>,
 }
 
@@ -173,25 +174,26 @@ impl Project {
             }
         }
 
+        // There is a new workflow run.
+        let first_seen = match self.pending.as_ref() {
+            None => None,
+            Some(existing) => {
+                if existing.workflow_run.id != new_workflow_run.id {
+                    eprintln!(
+                        "[{}] Abandoning workflow run {:#?} in favor of new workflow run.",
+                        existing.workflow_run.id, self.config.name,
+                    );
+                    None
+                } else {
+                    Some(existing.first_seen.clone())
+                }
+            }
+        };
         let run_time =
-            new_workflow_run.updated_at + chrono::Duration::minutes(self.config.wait_minutes);
+            first_seen.unwrap_or(now) + chrono::Duration::minutes(self.config.wait_minutes);
         // If it's not time to run the workflow yet, log and continue.
         if run_time > now {
-            let updated = match &self.pending {
-                None => true,
-                Some(pending) => {
-                    if pending.workflow_run.id != new_workflow_run.id {
-                        eprintln!(
-                            "[{}] Abandoning workflow run {:#?} in favor of new workflow run.",
-                            pending.workflow_run.id, self.config.name,
-                        );
-                        true
-                    } else {
-                        false
-                    }
-                }
-            };
-            if updated {
+            if first_seen.is_none() {
                 eprintln!(
                 "[{}] New successful workflow run found: {new_workflow_run:#?}; waiting until {} to deploy.",
                 self.config.name,
@@ -200,6 +202,7 @@ impl Project {
             }
             self.pending = Some(Pending {
                 workflow_run: new_workflow_run,
+                first_seen: first_seen.unwrap_or(now),
                 run_time,
             });
             return Ok(());
