@@ -69,7 +69,7 @@ impl Cli {
         );
 
         let poll_interval = chrono::Duration::seconds(match self.poll_interval_secs {
-            None | Some(0) => 300,
+            None | Some(0) => 60,
             Some(d) => d,
         });
         eprintln!("[main] using the following poll interval: {poll_interval:?}");
